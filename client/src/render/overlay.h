@@ -9,4 +9,7 @@ namespace vc::render {
 
 bool InstallOverlayHooks(FILE* log);
 
+// Открыта ли строка ввода чата (хук кадра замораживает игрока, пока печатает).
+bool IsChatOpen();
+
 } // namespace vc::render

@@ -12,7 +12,9 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 
 #include <shared/net/offline.h>
@@ -35,8 +37,48 @@ std::uint64_t NowMs() {
             .count());
 }
 
-constexpr std::uint16_t kMaxPlayers = 100;
 constexpr std::uint64_t kSessionTimeoutMs = 15000;
+
+// Настройки из server.cfg (переопределяются CLI-аргументами).
+struct ServerConfig {
+    std::string hostname = "Vice City Multiplayer | reVC test server";
+    std::uint16_t port = 7777;
+    std::uint16_t maxPlayers = 100;
+    std::string gamemode = "freeroam";
+};
+ServerConfig g_config;
+
+std::string Trim(const std::string& s) {
+    const auto first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    const auto last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, last - first + 1);
+}
+
+// Формат как в SA-MP: "ключ значение" построчно, # и // — комментарии.
+bool LoadConfig(const std::string& path, ServerConfig& cfg) {
+    std::ifstream in(path);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = Trim(line);
+        if (line.empty() || line[0] == '#' || line.starts_with("//")) continue;
+        std::istringstream iss(line);
+        std::string key;
+        iss >> key;
+        std::string rest;
+        std::getline(iss, rest);
+        rest = Trim(rest);
+        if (key == "hostname" && !rest.empty()) cfg.hostname = rest;
+        else if (key == "gamemode" && !rest.empty()) cfg.gamemode = rest;
+        else if (key == "port") cfg.port = static_cast<std::uint16_t>(std::atoi(rest.c_str()));
+        else if (key == "maxplayers")
+            cfg.maxPlayers = static_cast<std::uint16_t>(std::atoi(rest.c_str()));
+        // password/rcon_password/announce/weburl пока игнорируются (см. DEPLOY-SERVER.md)
+    }
+    if (cfg.maxPlayers == 0) cfg.maxPlayers = 100;
+    return true;
+}
 
 struct Session {
     vc::net::Endpoint endpoint;
@@ -109,6 +151,15 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             std::fflush(stdout);
             return false;
         }
+        if (!session.joined && JoinedCount(sessions) >= g_config.maxPlayers) {
+            Send(socket, session,
+                 vc::protocol::BuildConnectionRejected("Сервер заполнен, попробуйте позже."),
+                 vc::net::Reliability::ReliableOrdered, 0);
+            std::printf("[server] %s отклонён: сервер заполнен\n",
+                        KeyOf(session.endpoint).c_str());
+            std::fflush(stdout);
+            return false;
+        }
         if (!session.joined) {
             session.joined = true;
             session.playerId = nextPlayerId++;
@@ -122,14 +173,14 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                       &session);
         }
         Send(socket, session,
-             vc::protocol::BuildConnectionAccepted({session.playerId, kMaxPlayers}),
+             vc::protocol::BuildConnectionAccepted({session.playerId, g_config.maxPlayers}),
              vc::net::Reliability::ReliableOrdered, 0);
         Send(socket, session,
              vc::protocol::BuildServerMessage(
                  "Добро пожаловать на Vice City Multiplayer, " + session.nick +
                  "! Ты игрок #" + std::to_string(session.playerId) +
                  ". Онлайн: " + std::to_string(JoinedCount(sessions)) + "/" +
-                 std::to_string(kMaxPlayers)),
+                 std::to_string(g_config.maxPlayers)),
              vc::net::Reliability::ReliableOrdered, 0);
         return false;
     }
@@ -168,13 +219,21 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
 
 int main(int argc, char** argv) {
     vc::InitConsoleUtf8();
-    std::uint16_t port = 7777;
-    std::string hostname = "Vice City Multiplayer | reVC test server";
+    std::string configPath = "server.cfg";
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--config") configPath = argv[i + 1];
+    const bool configLoaded = LoadConfig(configPath, g_config);
+
+    // CLI переопределяет конфиг.
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--port") port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
-        if (arg == "--name") hostname = argv[++i];
+        if (arg == "--port")
+            g_config.port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
+        if (arg == "--name") g_config.hostname = argv[++i];
+        if (arg == "--config") ++i;
     }
+    const std::uint16_t port = g_config.port;
+    const std::string& hostname = g_config.hostname;
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
 
@@ -186,8 +245,13 @@ int main(int argc, char** argv) {
     constexpr std::uint64_t kServerGuid = 0x56434D5000000001ull; // "VCMP"
     std::printf("Vice City Multiplayer Server %s (protocol %u)\n",
                 vc::CLIENT_VERSION, vc::PROTOCOL_VERSION);
-    std::printf("Слушаю UDP 0.0.0.0:%u  name=\"%s\"  (Ctrl+C — стоп)\n", port,
-                hostname.c_str());
+    if (configLoaded)
+        std::printf("Конфиг загружен из %s\n", configPath.c_str());
+    else
+        std::printf("Конфиг %s не найден — использую значения по умолчанию\n",
+                    configPath.c_str());
+    std::printf("Слушаю UDP 0.0.0.0:%u  name=\"%s\"  mode=\"%s\"  maxplayers=%u  (Ctrl+C — стоп)\n",
+                port, hostname.c_str(), g_config.gamemode.c_str(), g_config.maxPlayers);
     std::fflush(stdout);
 
     std::map<std::string, Session> sessions;
@@ -202,14 +266,14 @@ int main(int argc, char** argv) {
             if (auto pingTime = vc::net::ParsePingTime(data)) {
                 const std::string motd = hostname + ";" +
                                          std::to_string(JoinedCount(sessions)) + ";" +
-                                         std::to_string(kMaxPlayers) + ";freeroam;ru";
+                                         std::to_string(g_config.maxPlayers) + ";" + g_config.gamemode + ";ru";
                 socket.SendTo(from, vc::net::BuildUnconnectedPong(*pingTime, kServerGuid, motd));
             } else if (vc::net::IsSampQuery(data, vc::net::kSampQueryInfo)) {
                 vc::net::SampServerInfo info;
                 info.players = static_cast<std::uint16_t>(JoinedCount(sessions));
-                info.maxPlayers = kMaxPlayers;
+                info.maxPlayers = g_config.maxPlayers;
                 info.hostname = hostname;
-                info.gamemode = "freeroam";
+                info.gamemode = g_config.gamemode;
                 info.language = "Russian";
                 socket.SendTo(from, vc::net::BuildSampInfoReply({"0.0.0.0", port}, info));
             } else if (vc::net::DecodeDatagram(data).has_value()) {

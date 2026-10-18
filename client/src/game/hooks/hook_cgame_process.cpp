@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../../network/net_client.h"
+#include "../../render/overlay.h"
 #include "../revc.h"
 #include "hook_cgame_process.h"
 
@@ -45,6 +46,23 @@ void OnFrameAfterOriginal() {
         position = vc::Vector3{p.x, p.y, p.z};
     }
     vc::network::NetClient::Instance().SetPlayerPosition(position);
+
+    // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).
+    // Делается после оригинального CGame::Process: возвращаем педа в точку открытия чата.
+    {
+        static std::optional<CVector> frozenAt;
+        if (vc::render::IsChatOpen() && ped) {
+            auto findVehicle = Resolve<FindPlayerVehicleFn>(revc::kFindPlayerVehicle);
+            const bool inVehicle = findVehicle && findVehicle() != nullptr;
+            if (!inVehicle && position) {
+                if (!frozenAt) frozenAt = CVector{position->x, position->y, position->z};
+                using TeleportFn = void (*)(void*, CVector);
+                Resolve<TeleportFn>(revc::kCPedTeleport)(ped, *frozenAt);
+            }
+        } else {
+            frozenAt.reset();
+        }
+    }
 
     if (g_frame % 60 != 0 || !g_log) return; // лог — опрос ~раз в секунду при 60 FPS
     if (!ped) {

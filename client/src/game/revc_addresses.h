@@ -91,4 +91,16 @@ inline constexpr std::uintptr_t kCPlayerPedCtor = 0x00214A40u;
 // CMenuManager FrontEndMenuManager
 inline constexpr std::uintptr_t kFrontEndMenuManager = 0x0061D900u;
 
+// void CPed::Teleport(CVector) — заморозка игрока при вводе чата
+inline constexpr std::uintptr_t kCPedTeleport = 0x001EB970u;
+
+// void CPad::UpdatePads() — будущее отключение ввода
+inline constexpr std::uintptr_t kCPadUpdatePads = 0x0010DA20u;
+
+// CKeyboardState CPad::NewKeyState
+inline constexpr std::uintptr_t kCPadNewKeyState = 0x0061E590u;
+
+// void CKeyboardState::Clear()
+inline constexpr std::uintptr_t kCKeyboardStateClear = 0x0010A7C0u;
+
 } // namespace vc::game::revc

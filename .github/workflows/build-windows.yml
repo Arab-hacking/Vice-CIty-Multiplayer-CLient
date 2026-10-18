@@ -34,6 +34,7 @@ jobs:
           Get-ChildItem build -Recurse -Include vc-client.dll,vc-launcher.exe,vc-server.exe,vc-netprobe.exe,vc-bot.exe |
             Copy-Item -Destination artifacts -Force
           Copy-Item tools/netprobe/servers.example.txt artifacts -Force
+          Copy-Item server/config/server.cfg.example artifacts -Force
           Get-ChildItem artifacts
 
       - name: Upload artifacts

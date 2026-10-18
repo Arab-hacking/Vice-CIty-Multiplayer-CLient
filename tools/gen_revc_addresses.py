@@ -49,6 +49,10 @@ CURATED = [
     ("kCCivilianPedCtor", "??0CCivilianPed@@QEAA@W4ePedType@@I@Z", "CCivilianPed::CCivilianPed(ePedType, uint32 model)"),
     ("kCPlayerPedCtor", "??0CPlayerPed@@QEAA@XZ", "CPlayerPed::CPlayerPed()"),
     ("kFrontEndMenuManager", "?FrontEndMenuManager@@3VCMenuManager@@A", "CMenuManager FrontEndMenuManager"),
+    ("kCPedTeleport", "?Teleport@CPed@@UEAAXVCVector@@@Z", "void CPed::Teleport(CVector) — заморозка игрока при вводе чата"),
+    ("kCPadUpdatePads", "?UpdatePads@CPad@@SAXXZ", "void CPad::UpdatePads() — будущее отключение ввода"),
+    ("kCPadNewKeyState", "?NewKeyState@CPad@@2VCKeyboardState@@A", "CKeyboardState CPad::NewKeyState"),
+    ("kCKeyboardStateClear", "?Clear@CKeyboardState@@QEAAXXZ", "void CKeyboardState::Clear()"),
 ]
 
 

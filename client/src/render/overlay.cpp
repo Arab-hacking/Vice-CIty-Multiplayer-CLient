@@ -43,6 +43,9 @@ FILE* g_log = nullptr;
 
 bool g_imguiReady = false;
 bool g_visible = true;
+bool g_chatOpen = false;
+bool g_chatFocusRequest = false;
+char g_chatBuffer[144] = {};
 HWND g_hwnd = nullptr;
 WNDPROC g_origWndProc = nullptr;
 
@@ -55,9 +58,56 @@ void Log(const char* text) {
 }
 
 LRESULT CALLBACK HookWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (g_imguiReady && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-        return 1;
+    if (g_imguiReady) {
+        // Пока открыт чат, клавиатуру игре не отдаём (DirectInput это не остановит —
+        // движение дополнительно замораживает хук CGame::Process через Teleport).
+        if (g_chatOpen && (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
+                           msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)) {
+            ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+            return 0;
+        }
+        if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+            return 1;
+    }
     return CallWindowProc(g_origWndProc, hwnd, msg, wParam, lParam);
+}
+
+void DrawChatWindow() {
+    // Открытие по T (когда не печатаем).
+    if (!g_chatOpen && ImGui::IsKeyPressed(ImGuiKey_T, false)) {
+        g_chatOpen = true;
+        g_chatFocusRequest = true;
+        g_chatBuffer[0] = '\0';
+        ImGui::GetIO().ClearInputCharacters(); // чтобы сама T не попала в текст
+    }
+    if (!g_chatOpen) return;
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        g_chatOpen = false;
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(12, 178), ImGuiCond_Appearing);
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize;
+    if (ImGui::Begin("##vcmp_chat_input", nullptr, flags)) {
+        ImGui::TextDisabled("Чат");
+        ImGui::SetNextItemWidth(420);
+        if (g_chatFocusRequest) {
+            ImGui::SetKeyboardFocusHere();
+            g_chatFocusRequest = false;
+        }
+        if (ImGui::InputTextWithHint("##chat_text", "Сообщение... (Enter - отправить)",
+                                     g_chatBuffer, sizeof(g_chatBuffer),
+                                     ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (g_chatBuffer[0] != '\0')
+                vc::network::NetClient::Instance().SendChat(g_chatBuffer);
+            g_chatBuffer[0] = '\0';
+            g_chatOpen = false;
+        }
+    }
+    ImGui::End();
 }
 
 HWND ResolveDeviceWindow(IDirect3DDevice9* device) {
@@ -148,10 +198,12 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
                 for (const std::string& line : chatLines)
                     ImGui::TextWrapped("%s", line.c_str());
                 ImGui::Separator();
-                ImGui::TextDisabled("F7 - показать/скрыть панель");
+                ImGui::TextDisabled("T - чат, F7 - панель");
             }
             ImGui::End();
         }
+
+        DrawChatWindow();
 
         ImGui::EndFrame();
         ImGui::Render();
@@ -190,6 +242,8 @@ bool GetVtableAddresses(void** outEndScene, void** outReset) {
 }
 
 } // namespace
+
+bool IsChatOpen() { return g_chatOpen; }
 
 bool InstallOverlayHooks(FILE* log) {
     g_log = log;
