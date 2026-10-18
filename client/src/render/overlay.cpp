@@ -144,7 +144,8 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
                 ImGui::TextColored(connected ? ImVec4(0.45f, 0.95f, 0.45f, 1.0f)
                                              : ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
                                    "Сеть: %s", net.StatusText().c_str());
-                for (const std::string& line : net.ChatLines())
+                const auto chatLines = net.ChatLines();
+                for (const std::string& line : chatLines)
                     ImGui::TextWrapped("%s", line.c_str());
                 ImGui::Separator();
                 ImGui::TextDisabled("F7 - показать/скрыть панель");

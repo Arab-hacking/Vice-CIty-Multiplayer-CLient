@@ -1,14 +1,18 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <cstdlib>
+#include <thread>
 
 #include <shared/protocol/codec.h>
+#include <shared/protocol/packets.h>
 #include <shared/version.h>
 
 #include "net_client.h"
 
 namespace vc::network {
+namespace {
+std::uint64_t NowMs() { return GetTickCount64(); }
+} // namespace
 
 NetClient& NetClient::Instance() {
     static NetClient instance;
@@ -18,17 +22,41 @@ NetClient& NetClient::Instance() {
 void NetClient::Log(const std::string& text) {
     OutputDebugStringA(text.c_str());
     if (m_log) {
+        std::lock_guard lock(m_mutex);
         std::fputs(text.c_str(), m_log);
         std::fflush(m_log);
     }
 }
 
+void NetClient::SetStatus(const std::string& text) {
+    std::lock_guard lock(m_mutex);
+    m_status = text;
+}
+
+std::string NetClient::StatusText() const {
+    std::lock_guard lock(m_mutex);
+    return m_status;
+}
+
+void NetClient::PushChatLine(const std::string& text) {
+    std::lock_guard lock(m_mutex);
+    m_chatLines.push_back(text);
+    if (m_chatLines.size() > 8) m_chatLines.erase(m_chatLines.begin());
+}
+
+std::vector<std::string> NetClient::ChatLines() const {
+    std::lock_guard lock(m_mutex);
+    return m_chatLines;
+}
+
 void NetClient::Init(FILE* log, const std::string& iniPath) {
+    if (m_started.exchange(true)) return;
     m_log = log;
+
     char ip[64] = "127.0.0.1";
     char nick[32] = "Player";
-    const int port = static_cast<int>(
-        GetPrivateProfileIntA("Server", "Port", 7777, iniPath.c_str()));
+    const int port =
+        static_cast<int>(GetPrivateProfileIntA("Server", "Port", 7777, iniPath.c_str()));
     GetPrivateProfileStringA("Server", "IP", ip, ip, sizeof(ip), iniPath.c_str());
     GetPrivateProfileStringA("Server", "Nick", nick, nick, sizeof(nick), iniPath.c_str());
     m_server = {ip, static_cast<std::uint16_t>(port)};
@@ -36,75 +64,132 @@ void NetClient::Init(FILE* log, const std::string& iniPath) {
 
     if (!m_socket.IsValid() || !m_socket.Bind(0)) {
         m_state = State::Failed;
-        m_status = "не удалось создать UDP-сокет";
-        Log("net: " + m_status + "\n");
+        SetStatus("не удалось создать UDP-сокет");
+        Log("net: не удалось создать UDP-сокет\n");
         return;
     }
     m_state = State::Connecting;
-    m_status = "подключение к " + m_server.ip + ":" + std::to_string(m_server.port) + "...";
-    Log("net: " + m_status + " ник=" + m_nick + "\n");
+    SetStatus("подключение к " + m_server.ip + ":" + std::to_string(m_server.port) + "...");
+    Log("net: подключение к " + m_server.ip + ":" + std::to_string(m_server.port) +
+        ", ник=" + m_nick + " (поток сети запущен)\n");
+    std::thread(&NetClient::ThreadMain, this).detach();
 }
 
-void NetClient::SendPayload(const std::vector<std::uint8_t>& payload,
-                            vc::net::Reliability reliability, std::uint8_t channel,
-                            std::uint64_t nowMs) {
-    m_socket.SendTo(m_server, m_peer.BuildMessage(payload, reliability, channel, nowMs));
+void NetClient::ShutdownBestEffort() {
+    if (!m_started.load()) return;
+    m_stop = true;
+    if (m_state.load() == State::Connected && m_socket.IsValid()) {
+        // Собираем Disconnect руками: ReliablePeer принадлежит потоку сети.
+        vc::net::InternalPacket packet;
+        packet.messageNumber = 0;
+        packet.reliability = vc::net::Reliability::Unreliable;
+        packet.payload = {static_cast<std::uint8_t>(vc::protocol::ClientPacket::Disconnect)};
+        vc::net::Datagram datagram;
+        datagram.packets.push_back(packet);
+        m_socket.SendTo(m_server, vc::net::EncodeDatagram(datagram));
+    }
+}
+
+void NetClient::SetPlayerPosition(const std::optional<vc::Vector3>& position) {
+    std::lock_guard lock(m_mutex);
+    m_latestPosition = position;
 }
 
 void NetClient::SendChat(const std::string& text) {
-    if (m_state != State::Connected) return;
-    SendPayload(vc::protocol::BuildChatMessage(text), vc::net::Reliability::ReliableOrdered, 0,
-                GetTickCount64());
+    std::lock_guard lock(m_mutex);
+    m_chatOutbox.push_back(text);
+}
+
+void NetClient::SendPayloadLockedPeer(const std::vector<std::uint8_t>& payload,
+                                      vc::net::Reliability reliability, std::uint8_t channel,
+                                      std::uint64_t nowMs) {
+    m_socket.SendTo(m_server, m_peer.BuildMessage(payload, reliability, channel, nowMs));
 }
 
 void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
     if (auto accepted = vc::protocol::ParseConnectionAccepted(payload)) {
         m_state = State::Connected;
         m_playerId = accepted->playerId;
-        m_status = "подключено к " + m_server.ip + ":" + std::to_string(m_server.port) +
-                   " (id " + std::to_string(m_playerId) + ")";
-        Log("net: " + m_status + "\n");
+        SetStatus("подключено к " + m_server.ip + ":" + std::to_string(m_server.port) +
+                  " (id " + std::to_string(m_playerId.load()) + ")");
+        Log("net: подключено, playerId=" + std::to_string(m_playerId.load()) + "\n");
     } else if (auto rejected = vc::protocol::ParseConnectionRejected(payload)) {
         m_state = State::Failed;
-        m_status = "сервер отказал: " + *rejected;
-        Log("net: " + m_status + "\n");
+        SetStatus("сервер отказал: " + *rejected);
+        Log("net: сервер отказал: " + *rejected + "\n");
     } else if (auto message = vc::protocol::ParseServerMessage(payload)) {
-        m_chatLines.push_back(*message);
-        if (m_chatLines.size() > 8) m_chatLines.erase(m_chatLines.begin());
+        PushChatLine(*message);
         Log("net[chat]: " + *message + "\n");
     }
 }
 
-void NetClient::Tick(std::uint64_t nowMs, const std::optional<vc::Vector3>& playerPosition) {
-    if (m_state == State::Disabled || m_state == State::Failed) return;
+void NetClient::ThreadMain() {
+    bool requestSent = false;
+    std::uint64_t connectStartedMs = 0;
+    std::uint64_t lastSyncMs = 0;
+    std::uint64_t lastKeepAliveMs = 0;
 
-    if (m_state == State::Connecting && !m_requestSent) {
-        m_requestSent = true;
-        m_connectStartedMs = nowMs;
-        SendPayload(vc::protocol::BuildConnectionRequest({vc::PROTOCOL_VERSION, m_nick}),
-                    vc::net::Reliability::ReliableOrdered, 0, nowMs);
-    }
-    if (m_state == State::Connecting && nowMs - m_connectStartedMs > 10000) {
-        m_state = State::Failed;
-        m_status = "сервер " + m_server.ip + ":" + std::to_string(m_server.port) +
-                   " не отвечает (таймаут)";
-        Log("net: " + m_status + "\n");
-        return;
-    }
+    while (!m_stop.load()) {
+        const std::uint64_t now = NowMs();
+        const State state = m_state.load();
+        if (state == State::Failed) {
+            Sleep(200);
+            continue;
+        }
 
-    for (int i = 0; i < 32; ++i) {
-        auto received = m_socket.Receive(0);
-        if (!received) break;
-        const auto incoming = m_peer.HandleDatagram(received->data);
-        for (const auto& payload : incoming.payloads) HandlePayload(payload);
-    }
-    if (auto ack = m_peer.BuildAckDatagram()) m_socket.SendTo(m_server, *ack);
-    for (const auto& resend : m_peer.CollectResends(nowMs)) m_socket.SendTo(m_server, resend);
+        if (state == State::Connecting && !requestSent) {
+            requestSent = true;
+            connectStartedMs = now;
+            SendPayloadLockedPeer(
+                vc::protocol::BuildConnectionRequest({vc::PROTOCOL_VERSION, m_nick}),
+                vc::net::Reliability::ReliableOrdered, 0, now);
+        }
+        if (state == State::Connecting && now - connectStartedMs > 10000) {
+            m_state = State::Failed;
+            SetStatus("сервер " + m_server.ip + ":" + std::to_string(m_server.port) +
+                      " не отвечает (таймаут)");
+            Log("net: таймаут подключения\n");
+            continue;
+        }
 
-    if (m_state == State::Connected && playerPosition && nowMs - m_lastSyncMs >= 100) {
-        m_lastSyncMs = nowMs;
-        SendPayload(vc::protocol::BuildOnFootSync(*playerPosition),
-                    vc::net::Reliability::UnreliableSequenced, 1, nowMs);
+        if (auto received = m_socket.Receive(20)) {
+            const auto incoming = m_peer.HandleDatagram(received->data);
+            for (const auto& payload : incoming.payloads) HandlePayload(payload);
+            if (auto ack = m_peer.BuildAckDatagram()) m_socket.SendTo(m_server, *ack);
+        }
+        for (const auto& resend : m_peer.CollectResends(now)) m_socket.SendTo(m_server, resend);
+
+        // Исходящий чат из игрового потока.
+        {
+            std::vector<std::string> outbox;
+            {
+                std::lock_guard lock(m_mutex);
+                outbox.swap(m_chatOutbox);
+            }
+            if (m_state.load() == State::Connected)
+                for (const std::string& text : outbox)
+                    SendPayloadLockedPeer(vc::protocol::BuildChatMessage(text),
+                                          vc::net::Reliability::ReliableOrdered, 0, now);
+        }
+
+        if (m_state.load() == State::Connected && now - lastSyncMs >= 100) {
+            lastSyncMs = now;
+            std::optional<vc::Vector3> position;
+            {
+                std::lock_guard lock(m_mutex);
+                position = m_latestPosition;
+            }
+            if (position) {
+                SendPayloadLockedPeer(vc::protocol::BuildOnFootSync(*position),
+                                      vc::net::Reliability::UnreliableSequenced, 1, now);
+            } else if (now - lastKeepAliveMs >= 3000) {
+                // Игрок не заспавнен (меню/пауза) — просто держим сессию живой.
+                lastKeepAliveMs = now;
+                SendPayloadLockedPeer(
+                    {static_cast<std::uint8_t>(vc::protocol::ClientPacket::KeepAlive)},
+                    vc::net::Reliability::Unreliable, 0, now);
+            }
+        }
     }
 }
 

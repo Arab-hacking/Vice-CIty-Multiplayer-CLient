@@ -102,6 +102,10 @@ int main(int argc, char** argv) {
         std::printf("vc-bot: сервер не принял подключение за отведённое время\n");
         return 1;
     }
+    // Вежливый дисконнект, чтобы сервер сразу закрыл сессию, а не по таймауту.
+    send({static_cast<std::uint8_t>(vc::protocol::ClientPacket::Disconnect)},
+         vc::net::Reliability::Unreliable, 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     std::printf("vc-bot: готово (playerId=%u)\n", myId);
     return 0;
 }

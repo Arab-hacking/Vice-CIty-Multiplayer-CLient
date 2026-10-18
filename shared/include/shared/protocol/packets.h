@@ -14,10 +14,12 @@ enum class ClientPacket : std::uint8_t {
     PassengerSync     = 12,
     ChatMessage       = 20,
     Command           = 21,
+    KeepAlive         = 22,
     BulletSync        = 30,
     Death             = 31,
     EnterVehicle      = 32,
     ExitVehicle       = 33,
+    Disconnect        = 34,
 };
 
 // Сервер -> Клиент (RPC)

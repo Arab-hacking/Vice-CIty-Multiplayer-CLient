@@ -72,6 +72,11 @@ align до байта, тело пакета         игровые пакеты
 | `ServerMessage` (130) | С→К | ReliableOrdered/0 | `u16 len, text` |
 | `ChatMessage` (20) | К→С | ReliableOrdered/0 | `u16 len, text` (сервер ретранслирует как ServerMessage всем) |
 | `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x, f32 y, f32 z` (расширится на Этапе 3) |
+| `KeepAlive` (22) | К→С | Unreliable/0, раз в 3 с без спавна | пустой |
+| `Disconnect` (34) | К→С | Unreliable/0 | пустой — сервер сразу закрывает сессию (иначе по таймауту 15 с) |
+
+Сеть клиента работает в отдельном потоке: пауза/Alt-Tab/загрузка игры соединение не рвут.
+Игровой поток только публикует свежую позицию (`SetPlayerPosition`).
 
 Сервер: сессия по endpoint, таймаут 15 с, welcome-сообщение, онлайн в SA-MP query — живой.
 Клиент: параметры подключения из `vc-client.ini` рядом с DLL (`[Server] IP/Port/Nick`,

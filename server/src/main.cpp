@@ -74,15 +74,30 @@ std::size_t JoinedCount(const std::map<std::string, Session>& sessions) {
     return n;
 }
 
-void HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
+// Возвращает true, если сессию надо закрыть немедленно (вежливый Disconnect).
+bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId,
                    const std::vector<std::uint8_t>& payload) {
-    if (payload.empty()) return;
+    if (payload.empty()) return false;
     const auto id = payload[0];
+
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::Disconnect)) {
+        if (session.joined) {
+            std::printf("[server] Игрок %s (id %u) вышел с сервера\n", session.nick.c_str(),
+                        session.playerId);
+            std::fflush(stdout);
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildServerMessage(session.nick + " вышел с сервера"),
+                      &session);
+        }
+        return true;
+    }
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::KeepAlive))
+        return false; // lastSeen уже обновлён по датаграмме
 
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::ConnectionRequest)) {
         const auto request = vc::protocol::ParseConnectionRequest(payload);
-        if (!request) return;
+        if (!request) return false;
         if (request->protocolVersion != vc::PROTOCOL_VERSION) {
             Send(socket, session,
                  vc::protocol::BuildConnectionRejected(
@@ -92,7 +107,7 @@ void HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                         KeyOf(session.endpoint).c_str(), request->protocolVersion,
                         vc::PROTOCOL_VERSION);
             std::fflush(stdout);
-            return;
+            return false;
         }
         if (!session.joined) {
             session.joined = true;
@@ -116,10 +131,10 @@ void HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                  ". Онлайн: " + std::to_string(JoinedCount(sessions)) + "/" +
                  std::to_string(kMaxPlayers)),
              vc::net::Reliability::ReliableOrdered, 0);
-        return;
+        return false;
     }
 
-    if (!session.joined) return;
+    if (!session.joined) return false;
 
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::OnFootSync)) {
         if (const auto pos = vc::protocol::ParseOnFootSync(payload)) {
@@ -134,7 +149,7 @@ void HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                 std::fflush(stdout);
             }
         }
-        return;
+        return false;
     }
 
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::ChatMessage)) {
@@ -144,8 +159,9 @@ void HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             std::fflush(stdout);
             Broadcast(socket, sessions, vc::protocol::BuildServerMessage(line));
         }
-        return;
+        return false;
     }
+    return false;
 }
 
 } // namespace
@@ -197,14 +213,19 @@ int main(int argc, char** argv) {
                 info.language = "Russian";
                 socket.SendTo(from, vc::net::BuildSampInfoReply({"0.0.0.0", port}, info));
             } else if (vc::net::DecodeDatagram(data).has_value()) {
-                Session& session = sessions[KeyOf(from)];
+                const std::string key = KeyOf(from);
+                Session& session = sessions[key];
                 session.endpoint = from;
                 session.lastSeenMs = NowMs();
                 const auto incoming = session.peer.HandleDatagram(data);
+                bool closeSession = false;
                 for (const auto& payload : incoming.payloads)
-                    HandlePayload(socket, sessions, session, nextPlayerId, payload);
+                    closeSession = HandlePayload(socket, sessions, session, nextPlayerId,
+                                                 payload) ||
+                                   closeSession;
                 if (auto ack = session.peer.BuildAckDatagram())
                     socket.SendTo(from, *ack);
+                if (closeSession) sessions.erase(key);
             } else {
                 std::printf("[net] %s:%u unknown datagram, %zu bytes, first=0x%02X\n",
                             from.ip.c_str(), from.port, data.size(),

@@ -134,6 +134,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(module);
         HANDLE thread = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
         if (thread) CloseHandle(thread);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        // Вежливо прощаемся с сервером (best-effort: без join потоков под loader lock).
+        vc::network::NetClient::Instance().ShutdownBestEffort();
     }
     return TRUE;
 }

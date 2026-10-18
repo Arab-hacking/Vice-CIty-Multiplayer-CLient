@@ -35,7 +35,7 @@ std::uint64_t g_frame = 0;
 void OnFrameAfterOriginal() {
     ++g_frame;
 
-    // Сеть крутим каждый кадр (главный поток): позиция, если игрок заспавнен.
+    // Сеть живёт в своём потоке: сюда только складываем свежую позицию.
     auto findPed = Resolve<FindPlayerPedFn>(revc::kFindPlayerPed);
     auto findCoors = Resolve<FindPlayerCoorsFn>(revc::kFindPlayerCoors);
     void* ped = findPed ? findPed() : nullptr;
@@ -44,7 +44,7 @@ void OnFrameAfterOriginal() {
         const CVector p = findCoors();
         position = vc::Vector3{p.x, p.y, p.z};
     }
-    vc::network::NetClient::Instance().Tick(GetTickCount64(), position);
+    vc::network::NetClient::Instance().SetPlayerPosition(position);
 
     if (g_frame % 60 != 0 || !g_log) return; // лог — опрос ~раз в секунду при 60 FPS
     if (!ped) {
