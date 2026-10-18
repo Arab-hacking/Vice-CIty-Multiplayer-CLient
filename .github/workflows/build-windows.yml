@@ -66,10 +66,15 @@ jobs:
       - name: Integration smoke test (server + netprobe)
         shell: bash
         run: |
-          ./build/server/vc-server --port 7777 &
+          set -x
+          find build -maxdepth 4 -type f -name 'vc-*' | sort
+          SRV_BIN="$(find build -type f -name vc-server | head -n1)"
+          PROBE_BIN="$(find build -type f -name vc-netprobe | head -n1)"
+          test -n "$SRV_BIN" && test -n "$PROBE_BIN"
+          "$SRV_BIN" --port 7777 &
           SRV=$!
           sleep 1
-          ./build/tools/netprobe/vc-netprobe 127.0.0.1 7777 --timeout-ms 2000 | tee probe.txt
+          "$PROBE_BIN" 127.0.0.1 7777 --timeout-ms 2000 | tee probe.txt
           kill $SRV || true
           grep -q "raknet-ping.*pong" probe.txt
           grep -q "samp-query" probe.txt
