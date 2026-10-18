@@ -1,0 +1,9 @@
+# Пример конфига сервера. Скопируйте в server.cfg рядом с vc-server.
+hostname        My Vice City Server
+port            7777
+maxplayers      100
+gamemode        freeroam
+password
+rcon_password   change_me
+announce        1
+weburl          example.com

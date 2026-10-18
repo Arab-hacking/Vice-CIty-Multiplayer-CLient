@@ -1,0 +1,31 @@
+# --- Сборка ---
+build/
+out/
+dist/
+*.user
+.vs/
+CMakeUserPresets.json
+
+# --- Зависимости ---
+vcpkg_installed/
+
+# --- Игра и её файлы (НЕ коммитим!) ---
+game/
+GTA Vice City/
+gta-vc.exe
+*.img
+*.dff
+*.txd
+
+# --- Реверс-инжиниринг ---
+*.i64
+*.idb
+*.gpr
+*.rep/
+*.dmp
+
+# --- Рантайм ---
+*.log
+settings.json
+server.cfg
+!server/config/server.cfg.example

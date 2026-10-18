@@ -1,0 +1,40 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "windows-x86-debug",
+            "displayName": "Windows x86 Debug (основной пресет клиента)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "Win32",
+            "binaryDir": "${sourceDir}/build/windows-x86-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "x86-windows"
+            }
+        },
+        {
+            "name": "windows-x86-release",
+            "inherits": "windows-x86-debug",
+            "displayName": "Windows x86 Release",
+            "binaryDir": "${sourceDir}/build/windows-x86-release",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "linux-server",
+            "displayName": "Linux — только сервер (для хостингов)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/linux-server",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "VC_BUILD_CLIENT": "OFF",
+                "VC_BUILD_LAUNCHER": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "windows-x86-debug",   "configurePreset": "windows-x86-debug" },
+        { "name": "windows-x86-release", "configurePreset": "windows-x86-release" },
+        { "name": "linux-server",        "configurePreset": "linux-server" }
+    ]
+}
