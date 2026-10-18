@@ -67,14 +67,18 @@ jobs:
         shell: bash
         run: |
           set -x
-          find build -maxdepth 4 -type f -name 'vc-*' | sort
           SRV_BIN="$(find build -type f -name vc-server | head -n1)"
           PROBE_BIN="$(find build -type f -name vc-netprobe | head -n1)"
           test -n "$SRV_BIN" && test -n "$PROBE_BIN"
-          "$SRV_BIN" --port 7777 &
+          "$SRV_BIN" --port 7777 > server.log 2>&1 &
           SRV=$!
           sleep 1
-          "$PROBE_BIN" 127.0.0.1 7777 --timeout-ms 2000 | tee probe.txt
+          ss -lunp 2>/dev/null | grep 7777 || true
+          "$PROBE_BIN" 127.0.0.1 7777 --timeout-ms 3000 > probe.txt 2>&1 || true
           kill $SRV || true
-          grep -q "raknet-ping.*pong" probe.txt
-          grep -q "samp-query" probe.txt
+          cat probe.txt
+          if ! grep -q "raknet-ping.*pong" probe.txt || ! grep -q "samp-query\]" probe.txt; then
+            while IFS= read -r line; do echo "::error::PROBE: $line"; done < probe.txt
+            while IFS= read -r line; do echo "::error::SERVER: $line"; done < server.log
+            exit 1
+          fi
