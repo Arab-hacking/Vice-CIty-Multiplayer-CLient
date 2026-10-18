@@ -109,7 +109,13 @@ inline constexpr std::uintptr_t kCPoolPedNew = 0x001D7B60u;
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 
-// void CPlaceable::SetHeading(float) — на будущее
+// void CPlaceable::SetHeading(float) — поворот куклы
 inline constexpr std::uintptr_t kCPlaceableSetHeading = 0x0010E810u;
+
+// bool CSprite::CalcScreenCoors(in, out, w, h, check) — мир->экран для никнеймов
+inline constexpr std::uintptr_t kCSpriteCalcScreenCoors = 0x0025ED00u;
+
+// void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы
+inline constexpr std::uintptr_t kCPedSetMoveState = 0x001E9E00u;
 
 } // namespace vc::game::revc

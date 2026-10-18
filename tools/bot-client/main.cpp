@@ -28,12 +28,14 @@ int main(int argc, char** argv) {
     vc::InitConsoleUtf8();
     vc::net::Endpoint server{"127.0.0.1", 7777};
     std::string nick = "TestBot";
+    std::string say = "Привет! Я тестовый бот vc-bot.";
     int seconds = 5;
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--ip") server.ip = argv[++i];
         if (arg == "--port") server.port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
         if (arg == "--nick") nick = argv[++i];
+        if (arg == "--say") say = argv[++i];
         if (arg == "--seconds") seconds = std::atoi(argv[++i]);
     }
 
@@ -94,7 +96,7 @@ int main(int argc, char** argv) {
 
         if (accepted && !chatSent) {
             chatSent = true;
-            send(vc::protocol::BuildChatMessage("Привет! Я тестовый бот vc-bot."),
+            send(vc::protocol::BuildChatMessage(say),
                  vc::net::Reliability::ReliableOrdered, 0);
         }
         if (accepted && NowMs() - lastSync >= 100) {

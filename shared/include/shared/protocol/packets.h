@@ -32,6 +32,7 @@ enum class ServerRpc : std::uint8_t {
     PlayerStreamIn     = 105,
     PlayerStreamOut    = 106,
     PlayerSyncUpdate   = 107,
+    TeleportPlayer     = 108,
     CreateVehicle      = 110,
     DestroyVehicle     = 111,
     CreateObject       = 120,

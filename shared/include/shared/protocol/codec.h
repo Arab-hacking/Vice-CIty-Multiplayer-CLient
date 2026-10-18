@@ -50,11 +50,13 @@ struct ConnectionAcceptedData {
 [[nodiscard]] std::vector<std::uint8_t> BuildOnFootSync(const Vector3& position);
 [[nodiscard]] std::optional<Vector3> ParseOnFootSync(const std::vector<std::uint8_t>& payload);
 
-// PlayerStreamIn: [105][u16 id][u8 nickLen][nick][f32 x,y,z] — создать куклу игрока.
+// PlayerStreamIn: [105][u16 id][u16 skin][u8 nickLen][nick][f32 x,y,z][f32 heading].
 struct PlayerStreamInData {
     std::uint16_t playerId = 0;
+    std::uint16_t skin = 7;
     std::string nick;
     Vector3 position{};
+    float heading = 0.0f;
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildPlayerStreamIn(const PlayerStreamInData& data);
 [[nodiscard]] std::optional<PlayerStreamInData> ParsePlayerStreamIn(
@@ -65,13 +67,24 @@ struct PlayerStreamInData {
 [[nodiscard]] std::optional<std::uint16_t> ParsePlayerStreamOut(
     const std::vector<std::uint8_t>& payload);
 
-// PlayerSyncUpdate: [107][u16 id][f32 x,y,z] — позиция чужого игрока (ретрансляция сервера).
+// PlayerSyncUpdate: [107][u16 id][f32 x,y,z][f32 heading] — позиция чужого игрока.
 struct PlayerSyncUpdateData {
     std::uint16_t playerId = 0;
     Vector3 position{};
+    float heading = 0.0f;
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data);
 [[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
+    const std::vector<std::uint8_t>& payload);
+
+// TeleportPlayer: [108][f32 x,y,z][f32 heading] — сервер перемещает локального игрока
+// (спавн-пойнт, /tp, /kill-респавн).
+struct TeleportData {
+    Vector3 position{};
+    float heading = 0.0f;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildTeleportPlayer(const TeleportData& data);
+[[nodiscard]] std::optional<TeleportData> ParseTeleportPlayer(
     const std::vector<std::uint8_t>& payload);
 
 } // namespace vc::protocol

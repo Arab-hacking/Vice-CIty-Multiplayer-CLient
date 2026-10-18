@@ -41,6 +41,22 @@ void OnFrameAfterOriginal() {
     auto findPed = Resolve<FindPlayerPedFn>(revc::kFindPlayerPed);
     auto findCoors = Resolve<FindPlayerCoorsFn>(revc::kFindPlayerCoors);
     void* ped = findPed ? findPed() : nullptr;
+    // Телепорт от сервера (спавн, /tp, /kill): применяем, как только пед существует.
+    if (ped) {
+        if (auto tp = vc::network::NetClient::Instance().TakePendingTeleport()) {
+            using TeleportFn = void (*)(void*, CVector);
+            using SetHeadingFn = void (*)(void*, float);
+            Resolve<TeleportFn>(revc::kCPedTeleport)(
+                ped, CVector{tp->position.x, tp->position.y, tp->position.z});
+            Resolve<SetHeadingFn>(revc::kCPlaceableSetHeading)(ped, tp->heading);
+            if (g_log) {
+                std::fprintf(g_log, "[frame %llu] применён телепорт сервера (%.1f, %.1f, %.1f)\n",
+                             static_cast<unsigned long long>(g_frame), tp->position.x,
+                             tp->position.y, tp->position.z);
+                std::fflush(g_log);
+            }
+        }
+    }
     std::optional<vc::Vector3> position;
     if (ped) {
         const CVector p = findCoors();

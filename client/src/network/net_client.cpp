@@ -124,11 +124,14 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         RemotePlayer& remote = m_remotePlayers[streamIn->playerId];
         remote.id = streamIn->playerId;
+        remote.skin = streamIn->skin;
         remote.nick = streamIn->nick;
         remote.targetPosition = streamIn->position;
+        remote.heading = streamIn->heading;
         remote.hasPosition = true;
         Log("net: stream-in игрока " + streamIn->nick + " (id " +
-            std::to_string(streamIn->playerId) + ")\n");
+            std::to_string(streamIn->playerId) + ", skin " +
+            std::to_string(streamIn->skin) + ")\n");
     } else if (auto streamOut = vc::protocol::ParsePlayerStreamOut(payload)) {
         std::lock_guard lock(m_mutex);
         m_remotePlayers.erase(*streamOut);
@@ -138,9 +141,21 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         auto it = m_remotePlayers.find(update->playerId);
         if (it != m_remotePlayers.end()) {
             it->second.targetPosition = update->position;
+            it->second.heading = update->heading;
             it->second.hasPosition = true;
         }
+    } else if (auto teleport = vc::protocol::ParseTeleportPlayer(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_pendingTeleport = LocalTeleport{teleport->position, teleport->heading};
+        Log("net: сервер телепортирует нас\n");
     }
+}
+
+std::optional<NetClient::LocalTeleport> NetClient::TakePendingTeleport() {
+    std::lock_guard lock(m_mutex);
+    auto result = m_pendingTeleport;
+    m_pendingTeleport.reset();
+    return result;
 }
 
 std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
