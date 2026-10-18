@@ -1,13 +1,12 @@
 {
     "name": "vice-city-multiplayer",
     "version-string": "0.1.0",
-    "description": "Мультиплеерный клиент и сервер для GTA: Vice City",
+    "description": "Мультиплеерный клиент (reVC x64) и сервер для GTA: Vice City. Сетевой стек — собственный RakNet wire format, внешних сетевых зависимостей нет.",
     "dependencies": [
-        "enet",
         "lua",
         {
             "name": "imgui",
-            "features": ["win32-binding"],
+            "features": ["win32-binding", "dx9-binding"],
             "platform": "windows"
         },
         {

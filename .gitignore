@@ -10,9 +10,13 @@ CMakeUserPresets.json
 vcpkg_installed/
 
 # --- Игра и её файлы (НЕ коммитим!) ---
-game/
+# ВАЖНО: с ведущим слэшем, иначе под шаблон попадал client/src/game/
+/game/
+/reVC/
 GTA Vice City/
 gta-vc.exe
+reVC.exe
+reVC.pdb
 *.img
 *.dff
 *.txd

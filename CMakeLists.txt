@@ -34,6 +34,10 @@ if(VC_BUILD_SERVER)
     add_subdirectory(server)
 endif()
 
+if(VC_BUILD_TOOLS)
+    add_subdirectory(tools/netprobe)
+endif()
+
 if(VC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

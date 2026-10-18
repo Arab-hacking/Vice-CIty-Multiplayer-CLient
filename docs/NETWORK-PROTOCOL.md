@@ -1,47 +1,70 @@
-# Сетевой протокол (черновик, Этап 2–3)
+# Сетевой протокол (RakNet wire format)
 
-> Единый источник правды — код в `shared/include/shared/protocol/`.
-> Этот файл — человекочитаемый обзор. Транспорт: UDP через ENet, порт по умолчанию **7777**.
+> Транспорт строится на проволочном формате RakNet той же версии, что использует
+> SA-MP. Формат датаграмм/заголовков/BitStream перенесён в C++ по реализации
+> **PyRakBR-fork** (Sahiro01, лицензия MIT): `core/bitstream.py`, `core/protocol.py`,
+> описание — `docs/PROTOCOL.md` в том репозитории. Атрибуция — [NOTICE](../NOTICE).
+>
+> **Сознательно НЕ перенесено:** логин в Black Russia/SA-MP (`core/br_auth.py`,
+> `core/auth_keys.py`, авторегистрация, «security»-обфускация тел пакетов SA-MP).
+> Этот стек связывает **наш reVC-клиент с нашим сервером**. Серверы Black Russia —
+> это GTA: San Andreas: Vice City-клиент не может на них играть ни при каком
+> RakNet-хендшейке (другой мир, модели, RPC и синхро-структуры).
 
-## Каналы ENet
+## Реализовано сейчас (`shared/include/shared/net/`)
 
-| Канал | Назначение | Надёжность |
-|---|---|---|
-| 0 | Системные пакеты и RPC | надёжная, по порядку |
-| 1 | Синхронизация (onfoot/vehicle) | ненадёжная (unreliable sequenced) |
-| 2 | Чат | надёжная |
+| Файл | Что |
+|---|---|
+| `bitstream.h/.cpp` | RakNet BitStream: биты от старшего, uint16/32 little-endian байтами, `WriteCompressed` |
+| `raknet.h/.cpp` | Датаграммы, внутренние пакеты, ACK-диапазоны |
+| `offline.h/.cpp` | RakNet unconnected ping/pong; SA-MP query `i` (ответы нашего сервера) |
+| `udp_socket.h/.cpp` | Winsock2/POSIX UDP |
 
-## Пакеты клиент → сервер
+### Датаграмма
 
-| ID | Пакет | Содержимое |
-|---|---|---|
-| 0 | `ID_CONNECTION_REQUEST` | версия протокола, ник, пароль сервера, версия клиента |
-| 10 | `ID_ON_FOOT_SYNC` | позиция, скорость, кватернион поворота, HP, броня, оружие, клавиши, анимация |
-| 11 | `ID_IN_VEHICLE_SYNC` | id машины, позиция, скорость, кватернион, HP машины, клавиши |
-| 12 | `ID_PASSENGER_SYNC` | id машины, место, оружие, клавиши |
-| 20 | `ID_CHAT_MESSAGE` | текст |
-| 21 | `ID_COMMAND` | текст команды (`/car 415`) — обрабатывает gamemode |
-| 30 | `ID_BULLET_SYNC` | оружие, начало/цель выстрела, в кого попал (Этап 5) |
-| 31 | `ID_DEATH` | причина смерти, убийца (если известен) |
-| 32 | `ID_ENTER_VEHICLE` / `ID_EXIT_VEHICLE` | id машины, место |
+```
+[has_acks : 1 бит]
+[ACK-диапазоны — если has_acks]   count:compressed16, далее {single:1, min:u16LE, max:u16LE?}
+[пакет][пакет]...                  до конца датаграммы
+```
 
-## Пакеты сервер → клиент (RPC)
+### Внутренний пакет
 
-| ID | RPC | Содержимое |
-|---|---|---|
-| 100 | `RPC_CONNECTION_ACCEPTED` | твой player id, параметры сервера |
-| 101 | `RPC_PLAYER_JOIN` / `RPC_PLAYER_QUIT` | id, ник |
-| 102 | `RPC_PLAYER_SPAWN` | id, скин, позиция, оружие — создать/переместить педа |
-| 103 | `RPC_PLAYER_STREAM_IN/OUT` | игрок вошёл/вышел из радиуса стриминга |
-| 110 | `RPC_CREATE_VEHICLE` / `RPC_DESTROY_VEHICLE` | модель, позиция, цвета |
-| 120 | `RPC_CREATE_OBJECT` / `RPC_DESTROY_OBJECT` | модель, позиция, поворот |
-| 130 | `RPC_SERVER_MESSAGE` | текст в чат (с цветом) |
-| 131 | `RPC_SET_TIME_WEATHER` | час, минута, id погоды |
-| 132 | `RPC_TELEPORT` | позиция локального игрока |
+```
+message_number    : u16 LE
+reliability       : 3 бита   (0 Unreliable, 1 UnreliableSequenced, 2 Reliable,
+                              3 ReliableOrdered, 4 ReliableSequenced)
+ordering_index    : u16 LE   только reliability 1/3/4
+~ordering_channel : 4 бита   только reliability 1/3/4 (канал инвертирован — как в RakNet)
+has_split         : 1 бит
+split_id          : u16 LE          если has_split
+split_index/count : compressed32    если has_split
+bitlen            : compressed16    длина тела в битах
+align до байта, тело пакета         игровые пакеты из shared/protocol
+```
 
-## Правила эволюции протокола
+Отличие от SA-MP/PyRakBR: у надёжных пакетов нет `checksum_byte` и обфускации тела —
+нам она не нужна (свой сервер), честность важнее совместимости с чужими серверами.
 
-1. Любое изменение формата пакета → `PROTOCOL_VERSION + 1` в `shared/include/shared/version.h`.
-2. Сервер при несовпадении версии отвечает понятной ошибкой («обновите клиент»), а не крашем.
-3. Поля пакетов синхронизации ужимаем (BitStream): например, клавиши — битовая маска,
-   HP — 1 байт, поворот — сжатый кватернион. Делаем после того, как заработает «в лоб».
+### Offline (до соединения)
+
+- RakNet **unconnected ping** `0x01` → **pong** `0x1C` с MOTD (`имя;онлайн;макс;режим;язык`) —
+  этим `vc-netprobe` и лаунчер проверяют доступность и пинг.
+- **SA-MP query** `'SAMP' + ip + port + 'i'` → наш сервер отвечает стандартным
+  info-пакетом SA-MP, чтобы его видели и сторонние мониторинги.
+
+## Дальше по протоколу (Этап 2–3)
+
+1. Connection handshake своего формата: версия протокола (`shared/version.h`), ник, пароль сервера.
+2. Слой надёжной доставки поверх фрейминга: очередь повторов по ACK (механика разобрана в PyRakBR `core/protocol.py`: resend ~по RTT, дедупликация по message_number, ordered-буферы по каналам, склейка split).
+3. Игровые пакеты/RPC — прежний черновик ID из `shared/include/shared/protocol/packets.h`
+   (onfoot/vehicle sync ненадёжно ~25 Гц, RPC и чат — ReliableOrdered).
+
+## Проверка серверов из списка пользователя
+
+`tools/netprobe/servers.example.txt` содержит локальный сервер и 3 сервера Black Russia.
+`vc-netprobe` делает **только** offline-ping и SA-MP query (поверхностная проверка
+«жив ли UDP-порт», как сервер-браузер). Из CI/песочницы внешние UDP недоступны —
+запускать с обычной машины: `vc-netprobe --file tools/netprobe/servers.example.txt`.
+Учитывай: BR использует кастомный протокол поверх RakNet, поэтому стандартные
+ping/query она может просто игнорировать, даже когда сервер онлайн.
