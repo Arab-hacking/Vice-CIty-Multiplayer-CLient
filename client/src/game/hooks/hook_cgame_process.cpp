@@ -108,9 +108,14 @@ bool InstallCGameProcessHook(FILE* log) {
     if (std::memcmp(target, kExpectedHead.data(), kExpectedHead.size()) != 0 ||
         target[kCallOffset] != 0xE8) {
         if (g_log) {
+            char bytes[16 * 3 + 1] = {};
+            for (int i = 0; i < 16; ++i)
+                std::snprintf(bytes + i * 3, 4, "%02X ", target[i]);
             std::fprintf(g_log,
                          "hook: пролог CGame::Process не совпал с ожидаемым "
-                         "(другой билд reVC?) — хук НЕ поставлен\n");
+                         "(другой билд reVC?) — хук НЕ поставлен\n"
+                         "hook: фактические байты: %s\n",
+                         bytes);
             std::fflush(g_log);
         }
         return false;

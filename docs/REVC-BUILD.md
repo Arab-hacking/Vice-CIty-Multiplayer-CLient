@@ -9,11 +9,15 @@
 
 | | |
 |---|---|
-| `reVC.exe` | 4 554 752 байт, **x64** (Machine 0x8664), ImageBase `0x140000000` |
-| SHA256 exe | `b2da882847fcd98974013f670651075064a09def9c616ffa7e0e084b3790ddf9` |
-| `reVC.pdb` | 22 925 312 байт, SHA256 `1b4c95252f5d310b7e92c133d83a93131237bd29f267a43ab2fed883a4999c5c` |
-| RSDS GUID в exe | `da7c3851-3404-4cb9-859f-ed3a1fee9625`, age 1, путь `reVC.pdb` |
-| PE timestamp (UTC) | 2026-10-17 15:04:15 |
+| `reVC.exe` | 4 559 872 байт, **x64** (Machine 0x8664), ImageBase `0x140000000` |
+| SHA256 exe | `5af4eb9122823c830b5d44ddfd7fabd2fa1f4db2fbd894e1240cef8e8450b3d0` |
+| `reVC.pdb` | 22 982 656 байт, SHA256 `044c489de7fcaf751ac293937c1a306e748db08b1fd14cac95d4bdeb951174b3` |
+| RSDS GUID в exe | `0d644e59-278c-4dfa-b9ec-596cc7494efd`, age 1, путь `reVC.pdb` |
+| PE timestamp (UTC) | 2026-10-17 16:16:38 |
+
+История билдов: первый присланный (2026-10-17 15:04, SHA256 `b2da8828...`) заменён
+этим — у владельца на машине оказался более свежий exe, и защита по прологу хука
+корректно отказалась ставиться. С тех пор DLL сама сверяет SHA256 exe при старте.
 | Подсистема/флаги | Windows GUI; ASLR + NX (DllCharacteristics 0x8160) |
 | Ключевые импорты | **d3d9.dll** (рендер — Direct3D9, не D3D8!), DINPUT8, XINPUT9_1_0, OpenAL32, libmpg123-0, WINMM, DDRAW |
 | Рядом в архиве | `gamecontrollerdb.txt`, `OpenAL32.dll`, `libmpg123-0.dll` |

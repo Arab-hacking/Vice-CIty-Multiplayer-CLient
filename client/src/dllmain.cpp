@@ -11,8 +11,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include <array>
+#include <string>
+
 #include <shared/version.h>
 
+#include "core/sha256.h"
 #include "game/hooks/hook_cgame_process.h"
 #include "game/revc.h"
 
@@ -31,6 +35,25 @@ bool IsHostReVC(char* pathBuf, DWORD pathLen) {
     const char* name = std::strrchr(pathBuf, '\\');
     name = name ? name + 1 : pathBuf;
     return _stricmp(name, "reVC.exe") == 0;
+}
+
+// SHA256 файла запущенного reVC.exe — сверяем с билдом, под который сделаны RVA.
+std::string Sha256OfFile(const char* path) {
+    HANDLE file = CreateFileA(path, GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return {};
+    vc::crypto::Sha256 hash;
+    std::array<std::uint8_t, 65536> buffer{};
+    DWORD read = 0;
+    while (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) &&
+           read > 0)
+        hash.Update(buffer.data(), read);
+    CloseHandle(file);
+    const auto digest = hash.Final();
+    char hex[65] = {};
+    for (int i = 0; i < 32; ++i) std::snprintf(hex + i * 2, 3, "%02x", digest[i]);
+    return hex;
 }
 
 DWORD WINAPI InitThread(LPVOID) {
@@ -62,6 +85,18 @@ DWORD WINAPI InitThread(LPVOID) {
                   static_cast<unsigned long long>(vc::game::revc::kFindPlayerPed),
                   static_cast<unsigned long long>(vc::game::revc::kCGameProcess));
     LogLine(log, buf);
+
+    const std::string actualHash = Sha256OfFile(exePath);
+    const bool buildMatches = actualHash == vc::game::revc::kTargetExeSha256;
+    std::snprintf(buf, sizeof(buf), "  reVC.exe SHA256 (факт): %s -> %s\n",
+                  actualHash.empty() ? "<не прочитать файл>" : actualHash.c_str(),
+                  buildMatches ? "СОВПАЛ, адреса валидны" : "НЕ совпал, хуки ставить нельзя!");
+    LogLine(log, buf);
+    if (!buildMatches) {
+        LogLine(log, "vc-client: пришлите этот reVC.exe + reVC.pdb для перегенерации адресов\n");
+        if (log) std::fclose(log);
+        return 0;
+    }
 
     if (vc::game::hooks::InstallCGameProcessHook(log)) {
         LogLine(log, "vc-client: хук CGame::Process установлен, пишем координаты раз в ~секунду\n");
