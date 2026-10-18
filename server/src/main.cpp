@@ -16,6 +16,7 @@
 #include <shared/net/offline.h>
 #include <shared/net/raknet.h>
 #include <shared/net/udp_socket.h>
+#include <shared/utils/console.h>
 #include <shared/version.h>
 
 namespace {
@@ -31,6 +32,7 @@ std::uint64_t NowMs() {
 } // namespace
 
 int main(int argc, char** argv) {
+    vc::InitConsoleUtf8();
     std::uint16_t port = 7777;
     std::string hostname = "Vice City Multiplayer | reVC test server";
     for (int i = 1; i + 1 < argc; ++i) {

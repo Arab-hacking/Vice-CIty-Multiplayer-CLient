@@ -8,6 +8,7 @@ endif()
 
 add_library(vc-client SHARED
     src/dllmain.cpp
+    src/game/hooks/hook_cgame_process.cpp
 )
 set_target_properties(vc-client PROPERTIES OUTPUT_NAME "vc-client")
 target_link_libraries(vc-client PRIVATE vc::shared)

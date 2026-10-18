@@ -1,10 +1,9 @@
-// Точка входа клиентской DLL под целевой билд reVC.exe (x64).
+// Точка входа клиентской DLL под целевой билд reVC.exe (x64), Этап 1.
 //
-// Этап 1 (текущее состояние): проверить, что мы загружены именно в reVC.exe,
-// вычислить базу модуля и разрешить через RVA из PDB адрес FindPlayerPed,
-// записать диагностику в vc-client.log рядом с reVC.exe.
-// Этап 1.5+: хук CGame::Process (RVA kCGameProcess) + D3D9-оверлей,
-// Этап 3: спавн сетевых педов через CWorld::Add / конструкторы из revc_addresses.h.
+// Поток инициализации: проверить хост (reVC.exe) -> открыть vc-client.log
+// рядом с игрой -> база модуля + резолв RVA из PDB -> поставить хук
+// CGame::Process, который раз в ~секунду пишет в лог координаты игрока
+// (FindPlayerPed/FindPlayerCoors из PDB-адресов). Оверлей — шагом позже.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -14,6 +13,7 @@
 
 #include <shared/version.h>
 
+#include "game/hooks/hook_cgame_process.h"
 #include "game/revc.h"
 
 namespace {
@@ -40,7 +40,6 @@ DWORD WINAPI InitThread(LPVOID) {
         return 0;
     }
 
-    // Лог рядом с reVC.exe.
     char logPath[MAX_PATH] = {};
     std::strncpy(logPath, exePath, MAX_PATH - 1);
     char* slash = std::strrchr(logPath, '\\');
@@ -52,31 +51,25 @@ DWORD WINAPI InitThread(LPVOID) {
     vc::game::g_moduleBase =
         reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
 
-    char buf[512];
+    char buf[640];
     std::snprintf(buf, sizeof(buf),
                   "vc-client %s: reVC.exe base = 0x%llX\n"
-                  "  target exe SHA256 (ожидается): %s\n",
+                  "  target exe SHA256 (ожидается): %s\n"
+                  "  FindPlayerPed RVA 0x%llX, CGame::Process RVA 0x%llX\n",
                   vc::CLIENT_VERSION,
                   static_cast<unsigned long long>(vc::game::g_moduleBase),
-                  vc::game::revc::kTargetExeSha256);
-    LogLine(log, buf);
-
-    const auto findPlayerPed =
-        vc::game::Resolve<vc::game::FindPlayerPedFn>(vc::game::revc::kFindPlayerPed);
-    std::snprintf(buf, sizeof(buf),
-                  "  FindPlayerPed @ 0x%llX (RVA 0x%llX)\n"
-                  "  CGame::Process @ 0x%llX (RVA 0x%llX)\n",
-                  static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(findPlayerPed)),
+                  vc::game::revc::kTargetExeSha256,
                   static_cast<unsigned long long>(vc::game::revc::kFindPlayerPed),
-                  static_cast<unsigned long long>(
-                      vc::game::g_moduleBase + vc::game::revc::kCGameProcess),
                   static_cast<unsigned long long>(vc::game::revc::kCGameProcess));
     LogLine(log, buf);
 
-    // NOTE: вызывать FindPlayerPed здесь рано — игра ещё инициализируется.
-    // Первый безопасный вызов — после загрузки мира, из хука CGame::Process.
-    LogLine(log, "vc-client: OK, ожидание этапов хуков (см. docs/ROADMAP.md)\n");
-    if (log) std::fclose(log);
+    if (vc::game::hooks::InstallCGameProcessHook(log)) {
+        LogLine(log, "vc-client: хук CGame::Process установлен, пишем координаты раз в ~секунду\n");
+        // Лог НЕ закрываем: хук пишет в него из игрового потока всю сессию.
+    } else {
+        LogLine(log, "vc-client: хук поставить не удалось (см. выше)\n");
+        if (log) std::fclose(log);
+    }
     return 0;
 }
 

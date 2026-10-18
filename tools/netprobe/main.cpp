@@ -17,6 +17,7 @@
 
 #include <shared/net/offline.h>
 #include <shared/net/udp_socket.h>
+#include <shared/utils/console.h>
 
 namespace {
 
@@ -84,6 +85,7 @@ void Probe(const vc::net::Endpoint& server, const std::string& label, int timeou
 } // namespace
 
 int main(int argc, char** argv) {
+    vc::InitConsoleUtf8();
     int timeoutMs = 3000;
     std::string filePath;
     std::string ip;
