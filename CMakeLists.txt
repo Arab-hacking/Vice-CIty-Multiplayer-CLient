@@ -5,11 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Клиентская DLL может существовать только как Win32/x86 —
-# gta-vc.exe является 32-битным процессом.
-option(VC_BUILD_CLIENT   "Собирать клиентскую DLL (только Windows x86)" ON)
+# Цель клиента — конкретный билд reVC.exe (x64!). Адреса — из его PDB,
+# см. docs/REVC-BUILD.md и client/src/game/revc_addresses.h.
+option(VC_BUILD_CLIENT   "Собирать клиентскую DLL (только Windows x64)" ON)
 option(VC_BUILD_LAUNCHER "Собирать лаунчер (только Windows)" ON)
 option(VC_BUILD_SERVER   "Собирать игровой сервер" ON)
+option(VC_BUILD_TOOLS    "Собирать утилиты (vc-netprobe)" ON)
 option(VC_BUILD_TESTS    "Собирать тесты" OFF)
 
 add_subdirectory(shared)
