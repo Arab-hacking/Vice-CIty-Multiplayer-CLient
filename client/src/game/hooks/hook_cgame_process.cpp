@@ -33,20 +33,31 @@ std::uint64_t g_frame = 0;
 
 void OnFrameAfterOriginal() {
     ++g_frame;
-    if (g_frame % 60 != 0 || !g_log) return; // ~раз в секунду при 60 FPS
+    if (g_frame % 60 != 0 || !g_log) return; // опрос ~раз в секунду при 60 FPS
 
     auto findPed = Resolve<FindPlayerPedFn>(revc::kFindPlayerPed);
     auto findCoors = Resolve<FindPlayerCoorsFn>(revc::kFindPlayerCoors);
     void* ped = findPed ? findPed() : nullptr;
     if (!ped) {
-        std::fprintf(g_log, "[frame %llu] игрок ещё не заспавнен\n",
-                     static_cast<unsigned long long>(g_frame));
-    } else {
-        const CVector pos = findCoors();
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            std::fprintf(g_log, "[frame %llu] игрок ещё не заспавнен\n",
+                         static_cast<unsigned long long>(g_frame));
+            std::fflush(g_log);
+        }
+        return;
+    }
+    // В лог — только если игрок заметно сдвинулся (иначе за сессию набегают мегабайты).
+    static CVector lastLogged{1e9f, 1e9f, 1e9f};
+    const CVector pos = findCoors();
+    const float dx = pos.x - lastLogged.x, dy = pos.y - lastLogged.y, dz = pos.z - lastLogged.z;
+    if (dx * dx + dy * dy + dz * dz > 0.25f) {
+        lastLogged = pos;
         std::fprintf(g_log, "[frame %llu] ped=%p pos=(%.2f, %.2f, %.2f)\n",
                      static_cast<unsigned long long>(g_frame), ped, pos.x, pos.y, pos.z);
+        std::fflush(g_log);
     }
-    std::fflush(g_log);
 }
 
 void Hook_CGameProcess() {
@@ -100,6 +111,8 @@ void ResumeThreads(std::vector<HANDLE>& suspended) {
 }
 
 } // namespace
+
+std::uint64_t FrameCounter() { return g_frame; }
 
 bool InstallCGameProcessHook(FILE* log) {
     g_log = log;

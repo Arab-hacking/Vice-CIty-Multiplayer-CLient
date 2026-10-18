@@ -19,6 +19,7 @@
 #include "core/sha256.h"
 #include "game/hooks/hook_cgame_process.h"
 #include "game/revc.h"
+#include "render/overlay.h"
 
 namespace {
 
@@ -99,8 +100,11 @@ DWORD WINAPI InitThread(LPVOID) {
     }
 
     if (vc::game::hooks::InstallCGameProcessHook(log)) {
-        LogLine(log, "vc-client: хук CGame::Process установлен, пишем координаты раз в ~секунду\n");
-        // Лог НЕ закрываем: хук пишет в него из игрового потока всю сессию.
+        LogLine(log, "vc-client: хук CGame::Process установлен, пишем координаты при движении\n");
+        // Оверлей поверх D3D9 (панель ImGui, F7).
+        if (!vc::render::InstallOverlayHooks(log))
+            LogLine(log, "vc-client: оверлей не установился (см. выше), игра продолжается без него\n");
+        // Лог НЕ закрываем: хуки пишут в него из игрового потока всю сессию.
     } else {
         LogLine(log, "vc-client: хук поставить не удалось (см. выше)\n");
         if (log) std::fclose(log);

@@ -1,17 +1,8 @@
 {
     "name": "vice-city-multiplayer",
-    "version-string": "0.1.0",
-    "description": "Мультиплеерный клиент (reVC x64) и сервер для GTA: Vice City. Сетевой стек — собственный RakNet wire format, внешних сетевых зависимостей нет.",
+    "version-string": "0.3.0",
+    "description": "Мультиплеерный клиент (reVC x64) и сервер для GTA: Vice City. Сеть — собственный RakNet wire format; ImGui и MinHook лежат vendored в third-party/, vcpkg пока нужен только Lua на будущее.",
     "dependencies": [
-        "lua",
-        {
-            "name": "imgui",
-            "features": ["win32-binding", "dx9-binding"],
-            "platform": "windows"
-        },
-        {
-            "name": "minhook",
-            "platform": "windows"
-        }
+        "lua"
     ]
 }
