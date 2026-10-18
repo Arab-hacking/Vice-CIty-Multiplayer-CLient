@@ -53,12 +53,35 @@ align до байта, тело пакета         игровые пакеты
 - **SA-MP query** `'SAMP' + ip + port + 'i'` → наш сервер отвечает стандартным
   info-пакетом SA-MP, чтобы его видели и сторонние мониторинги.
 
-## Дальше по протоколу (Этап 2–3)
+## Слой надёжной доставки (реализован, Этап 2)
 
-1. Connection handshake своего формата: версия протокола (`shared/version.h`), ник, пароль сервера.
-2. Слой надёжной доставки поверх фрейминга: очередь повторов по ACK (механика разобрана в PyRakBR `core/protocol.py`: resend ~по RTT, дедупликация по message_number, ordered-буферы по каналам, склейка split).
-3. Игровые пакеты/RPC — прежний черновик ID из `shared/include/shared/protocol/packets.h`
-   (onfoot/vehicle sync ненадёжно ~25 Гц, RPC и чат — ReliableOrdered).
+`shared/net/peer.*` (`vc::net::ReliablePeer`, по одному на собеседника):
+нумерация `message_number`, ACK-диапазоны, переотправка через 500 мс (до 12 раз),
+дедупликация надёжных, ordered-буферы по 16 каналам, отбрасывание устаревших sequenced.
+
+## Сессия и игровые пакеты (реализовано, Этап 2)
+
+Тела пакетов сериализует `shared/protocol/codec.*`; все числа little-endian,
+первый байт — ID из `shared/protocol/packets.h`:
+
+| Пакет | Направление | Reliability/канал | Формат после ID |
+|---|---|---|---|
+| `ConnectionRequest` (0) | К→С | ReliableOrdered/0 | `u32 protocol, u8 nickLen, nick` |
+| `ConnectionAccepted` (100) | С→К | ReliableOrdered/0 | `u16 playerId, u16 maxPlayers` |
+| `ConnectionRejected` (104) | С→К | ReliableOrdered/0 | `u16 len, reason` |
+| `ServerMessage` (130) | С→К | ReliableOrdered/0 | `u16 len, text` |
+| `ChatMessage` (20) | К→С | ReliableOrdered/0 | `u16 len, text` (сервер ретранслирует как ServerMessage всем) |
+| `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x, f32 y, f32 z` (расширится на Этапе 3) |
+
+Сервер: сессия по endpoint, таймаут 15 с, welcome-сообщение, онлайн в SA-MP query — живой.
+Клиент: параметры подключения из `vc-client.ini` рядом с DLL (`[Server] IP/Port/Nick`,
+лаунчер создаёт дефолт 127.0.0.1:7777/Player). Для тестов без игры — `tools/bot-client` (`vc-bot`).
+
+## Дальше по протоколу (Этап 3)
+
+1. Рассылка OnFootSync чужих игроков (стриминг по радиусу), packet `PlayerSpawn/StreamIn`.
+2. Расширенный OnFootSync: скорость, поворот, HP, оружие, анимация.
+3. Пароль сервера в ConnectionRequest.
 
 ## Проверка серверов из списка пользователя
 

@@ -5,7 +5,10 @@
 
 #include <shared/net/bitstream.h>
 #include <shared/net/offline.h>
+#include <shared/net/peer.h>
 #include <shared/net/raknet.h>
+#include <shared/protocol/codec.h>
+#include <shared/version.h>
 
 namespace {
 int g_failures = 0;
@@ -142,12 +145,73 @@ void TestOfflineAndQuery() {
     CHECK(vc::net::IsSampQuery(query, vc::net::kSampQueryInfo));
 }
 
+void TestReliablePeer() {
+    vc::net::ReliablePeer a, b;
+    const auto msg1 = a.BuildMessage(std::vector<std::uint8_t>{1, 2, 3}, vc::net::Reliability::ReliableOrdered, 0, 1000);
+    CHECK(a.UnackedCount() == 1);
+    const auto got1 = b.HandleDatagram(msg1);
+    CHECK(got1.payloads.size() == 1 && got1.payloads[0] == std::vector<std::uint8_t>({1, 2, 3}));
+    // Дубликат той же датаграммы второй раз не выдаётся
+    CHECK(b.HandleDatagram(msg1).payloads.empty());
+    // ACK снимает сообщение с переотправки
+    auto ack = b.BuildAckDatagram();
+    CHECK(ack.has_value());
+    a.HandleDatagram(*ack);
+    CHECK(a.UnackedCount() == 0);
+    CHECK(a.CollectResends(100000).empty());
+
+    // Ordered: пакеты пришли 2,0,1 -> выдача строго 0,1,2
+    vc::net::ReliablePeer c, d;
+    const auto m0 = c.BuildMessage(std::vector<std::uint8_t>{10}, vc::net::Reliability::ReliableOrdered, 0, 0);
+    const auto m1 = c.BuildMessage(std::vector<std::uint8_t>{11}, vc::net::Reliability::ReliableOrdered, 0, 0);
+    const auto m2 = c.BuildMessage(std::vector<std::uint8_t>{12}, vc::net::Reliability::ReliableOrdered, 0, 0);
+    CHECK(d.HandleDatagram(m2).payloads.empty());
+    auto got0 = d.HandleDatagram(m0);
+    CHECK(got0.payloads.size() == 1 && got0.payloads[0][0] == 10);
+    auto got12 = d.HandleDatagram(m1);
+    CHECK(got12.payloads.size() == 2 && got12.payloads[0][0] == 11 && got12.payloads[1][0] == 12);
+
+    // Sequenced: устаревший пакет отбрасывается
+    vc::net::ReliablePeer e, f;
+    const auto s0 = e.BuildMessage(std::vector<std::uint8_t>{20}, vc::net::Reliability::UnreliableSequenced, 1, 0);
+    const auto s1 = e.BuildMessage(std::vector<std::uint8_t>{21}, vc::net::Reliability::UnreliableSequenced, 1, 0);
+    CHECK(f.HandleDatagram(s1).payloads.size() == 1);
+    CHECK(f.HandleDatagram(s0).payloads.empty());
+
+    // Переотправка по таймауту
+    vc::net::ReliablePeer g;
+    g.BuildMessage(std::vector<std::uint8_t>{7}, vc::net::Reliability::Reliable, 0, 1000);
+    CHECK(g.CollectResends(1200).empty());
+    CHECK(g.CollectResends(1600).size() == 1);
+}
+
+void TestCodec() {
+    const auto req = vc::protocol::BuildConnectionRequest({vc::PROTOCOL_VERSION, "Tommy"});
+    const auto parsedReq = vc::protocol::ParseConnectionRequest(req);
+    CHECK(parsedReq && parsedReq->protocolVersion == vc::PROTOCOL_VERSION &&
+          parsedReq->nick == "Tommy");
+
+    const auto acc = vc::protocol::BuildConnectionAccepted({5, 100});
+    const auto parsedAcc = vc::protocol::ParseConnectionAccepted(acc);
+    CHECK(parsedAcc && parsedAcc->playerId == 5 && parsedAcc->maxPlayers == 100);
+
+    const auto msg = vc::protocol::BuildServerMessage("Привет, Вайс-Сити!");
+    const auto parsedMsg = vc::protocol::ParseServerMessage(msg);
+    CHECK(parsedMsg && *parsedMsg == "Привет, Вайс-Сити!");
+
+    const auto sync = vc::protocol::BuildOnFootSync({-378.5f, -589.1f, 25.32f});
+    const auto parsedSync = vc::protocol::ParseOnFootSync(sync);
+    CHECK(parsedSync && parsedSync->x == -378.5f && parsedSync->y == -589.1f);
+}
+
 } // namespace
 
 int main() {
     TestBitStream();
     TestRakNetFraming();
     TestOfflineAndQuery();
+    TestReliablePeer();
+    TestCodec();
     if (g_failures == 0)
         std::printf("OK: все тесты пройдены\n");
     else

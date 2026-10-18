@@ -18,6 +18,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../../network/net_client.h"
 #include "../revc.h"
 #include "hook_cgame_process.h"
 
@@ -33,11 +34,19 @@ std::uint64_t g_frame = 0;
 
 void OnFrameAfterOriginal() {
     ++g_frame;
-    if (g_frame % 60 != 0 || !g_log) return; // опрос ~раз в секунду при 60 FPS
 
+    // Сеть крутим каждый кадр (главный поток): позиция, если игрок заспавнен.
     auto findPed = Resolve<FindPlayerPedFn>(revc::kFindPlayerPed);
     auto findCoors = Resolve<FindPlayerCoorsFn>(revc::kFindPlayerCoors);
     void* ped = findPed ? findPed() : nullptr;
+    std::optional<vc::Vector3> position;
+    if (ped) {
+        const CVector p = findCoors();
+        position = vc::Vector3{p.x, p.y, p.z};
+    }
+    vc::network::NetClient::Instance().Tick(GetTickCount64(), position);
+
+    if (g_frame % 60 != 0 || !g_log) return; // лог — опрос ~раз в секунду при 60 FPS
     if (!ped) {
         static bool reported = false;
         if (!reported) {

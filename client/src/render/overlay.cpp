@@ -25,6 +25,7 @@
 
 #include "../game/hooks/hook_cgame_process.h"
 #include "../game/revc.h"
+#include "../network/net_client.h"
 #include "overlay.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -137,7 +138,16 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
                     ImGui::TextDisabled("Игрок не заспавнен");
                 }
                 ImGui::Separator();
-                ImGui::TextDisabled("F7 — показать/скрыть панель");
+                const auto& net = vc::network::NetClient::Instance();
+                const bool connected =
+                    net.GetState() == vc::network::State::Connected;
+                ImGui::TextColored(connected ? ImVec4(0.45f, 0.95f, 0.45f, 1.0f)
+                                             : ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                                   "Сеть: %s", net.StatusText().c_str());
+                for (const std::string& line : net.ChatLines())
+                    ImGui::TextWrapped("%s", line.c_str());
+                ImGui::Separator();
+                ImGui::TextDisabled("F7 - показать/скрыть панель");
             }
             ImGui::End();
         }

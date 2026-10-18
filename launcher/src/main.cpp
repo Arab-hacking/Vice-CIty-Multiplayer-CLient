@@ -91,6 +91,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    // Настройки подключения для клиента (DLL читает vc-client.ini рядом с собой).
+    // Создаём с дефолтами, если игрок ещё не правил файл руками.
+    const std::wstring clientIni = launcherDir + L"vc-client.ini";
+    if (!FileExists(clientIni)) {
+        WritePrivateProfileStringW(L"Server", L"IP", L"127.0.0.1", clientIni.c_str());
+        WritePrivateProfileStringW(L"Server", L"Port", L"7777", clientIni.c_str());
+        WritePrivateProfileStringW(L"Server", L"Nick", L"Player", clientIni.c_str());
+    }
+
     wchar_t saved[MAX_PATH] = {};
     GetPrivateProfileStringW(L"Game", L"Path", L"", saved, MAX_PATH, iniPath.c_str());
     std::wstring gamePath = saved;

@@ -38,6 +38,7 @@ endif()
 
 if(VC_BUILD_TOOLS)
     add_subdirectory(tools/netprobe)
+    add_subdirectory(tools/bot-client)
 endif()
 
 if(VC_BUILD_TESTS)

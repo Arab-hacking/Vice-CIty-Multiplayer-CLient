@@ -31,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts | Out-Null
-          Get-ChildItem build -Recurse -Include vc-client.dll,vc-launcher.exe,vc-server.exe,vc-netprobe.exe |
+          Get-ChildItem build -Recurse -Include vc-client.dll,vc-launcher.exe,vc-server.exe,vc-netprobe.exe,vc-bot.exe |
             Copy-Item -Destination artifacts -Force
           Copy-Item tools/netprobe/servers.example.txt artifacts -Force
           Get-ChildItem artifacts
@@ -75,10 +75,13 @@ jobs:
           sleep 1
           ss -lunp 2>/dev/null | grep 7777 || true
           "$PROBE_BIN" 127.0.0.1 7777 --timeout-ms 3000 > probe.txt 2>&1 || true
+          BOT_BIN="$(find build -type f -name vc-bot | head -n1)"
+          "$BOT_BIN" --port 7777 --nick CIBot --seconds 3 > bot.txt 2>&1 || true
           kill $SRV || true
-          cat probe.txt
-          if ! grep -q "raknet-ping.*pong" probe.txt || ! grep -q "samp-query\]" probe.txt; then
+          cat probe.txt bot.txt
+          if ! grep -q "raknet-ping.*pong" probe.txt || ! grep -q "samp-query\]" probe.txt || ! grep -q "ПОДКЛЮЧЕНО" bot.txt; then
             while IFS= read -r line; do echo "::error::PROBE: $line"; done < probe.txt
+            while IFS= read -r line; do echo "::error::BOT: $line"; done < bot.txt
             while IFS= read -r line; do echo "::error::SERVER: $line"; done < server.log
             exit 1
           fi

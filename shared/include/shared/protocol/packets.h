@@ -26,6 +26,7 @@ enum class ServerRpc : std::uint8_t {
     PlayerJoin         = 101,
     PlayerQuit         = 102,
     PlayerSpawn        = 103,
+    ConnectionRejected = 104,
     CreateVehicle      = 110,
     DestroyVehicle     = 111,
     CreateObject       = 120,

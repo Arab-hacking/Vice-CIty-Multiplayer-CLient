@@ -19,9 +19,21 @@
 #include "core/sha256.h"
 #include "game/hooks/hook_cgame_process.h"
 #include "game/revc.h"
+#include "network/net_client.h"
 #include "render/overlay.h"
 
 namespace {
+
+HMODULE g_dllModule = nullptr;
+
+// Папка, где лежит vc-client.dll (там же vc-client.ini с настройками сервера).
+std::string DllDirectory() {
+    char path[MAX_PATH] = {};
+    GetModuleFileNameA(g_dllModule, path, MAX_PATH);
+    std::string p = path;
+    const std::size_t slash = p.find_last_of("\\/");
+    return slash == std::string::npos ? std::string() : p.substr(0, slash + 1);
+}
 
 void LogLine(FILE* log, const char* text) {
     OutputDebugStringA(text);
@@ -104,6 +116,8 @@ DWORD WINAPI InitThread(LPVOID) {
         // Оверлей поверх D3D9 (панель ImGui, F7).
         if (!vc::render::InstallOverlayHooks(log))
             LogLine(log, "vc-client: оверлей не установился (см. выше), игра продолжается без него\n");
+        // Сеть: подключение к серверу из vc-client.ini (Tick идёт из хука кадра).
+        vc::network::NetClient::Instance().Init(log, DllDirectory() + "vc-client.ini");
         // Лог НЕ закрываем: хуки пишут в него из игрового потока всю сессию.
     } else {
         LogLine(log, "vc-client: хук поставить не удалось (см. выше)\n");
@@ -116,6 +130,7 @@ DWORD WINAPI InitThread(LPVOID) {
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
+        g_dllModule = module;
         DisableThreadLibraryCalls(module);
         HANDLE thread = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
         if (thread) CloseHandle(thread);
