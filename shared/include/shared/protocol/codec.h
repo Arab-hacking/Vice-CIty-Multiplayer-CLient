@@ -46,8 +46,32 @@ struct ConnectionAcceptedData {
 [[nodiscard]] std::optional<std::string> ParseChatMessage(
     const std::vector<std::uint8_t>& payload);
 
-// OnFootSync: [10][f32 x][f32 y][f32 z] — расширится на Этапе 3 (скорость, HP, оружие).
+// OnFootSync: [10][f32 x][f32 y][f32 z] — позиция локального игрока на сервер.
 [[nodiscard]] std::vector<std::uint8_t> BuildOnFootSync(const Vector3& position);
 [[nodiscard]] std::optional<Vector3> ParseOnFootSync(const std::vector<std::uint8_t>& payload);
+
+// PlayerStreamIn: [105][u16 id][u8 nickLen][nick][f32 x,y,z] — создать куклу игрока.
+struct PlayerStreamInData {
+    std::uint16_t playerId = 0;
+    std::string nick;
+    Vector3 position{};
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildPlayerStreamIn(const PlayerStreamInData& data);
+[[nodiscard]] std::optional<PlayerStreamInData> ParsePlayerStreamIn(
+    const std::vector<std::uint8_t>& payload);
+
+// PlayerStreamOut: [106][u16 id] — убрать куклу.
+[[nodiscard]] std::vector<std::uint8_t> BuildPlayerStreamOut(std::uint16_t playerId);
+[[nodiscard]] std::optional<std::uint16_t> ParsePlayerStreamOut(
+    const std::vector<std::uint8_t>& payload);
+
+// PlayerSyncUpdate: [107][u16 id][f32 x,y,z] — позиция чужого игрока (ретрансляция сервера).
+struct PlayerSyncUpdateData {
+    std::uint16_t playerId = 0;
+    Vector3 position{};
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data);
+[[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
+    const std::vector<std::uint8_t>& payload);
 
 } // namespace vc::protocol

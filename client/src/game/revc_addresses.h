@@ -103,4 +103,13 @@ inline constexpr std::uintptr_t kCPadNewKeyState = 0x0061E590u;
 // void CKeyboardState::Clear()
 inline constexpr std::uintptr_t kCKeyboardStateClear = 0x0010A7C0u;
 
+// CPed* CPool<CPed>::New() — аллокация слота педа
+inline constexpr std::uintptr_t kCPoolPedNew = 0x001D7B60u;
+
+// void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
+inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
+
+// void CPlaceable::SetHeading(float) — на будущее
+inline constexpr std::uintptr_t kCPlaceableSetHeading = 0x0010E810u;
+
 } // namespace vc::game::revc

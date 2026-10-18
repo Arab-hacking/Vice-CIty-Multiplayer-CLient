@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../../network/net_client.h"
+#include "../../pools/player_pool.h"
 #include "../../render/overlay.h"
 #include "../revc.h"
 #include "hook_cgame_process.h"
@@ -46,6 +47,7 @@ void OnFrameAfterOriginal() {
         position = vc::Vector3{p.x, p.y, p.z};
     }
     vc::network::NetClient::Instance().SetPlayerPosition(position);
+    vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
 
     // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).
     // Делается после оригинального CGame::Process: возвращаем педа в точку открытия чата.

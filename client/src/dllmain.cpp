@@ -20,6 +20,7 @@
 #include "game/hooks/hook_cgame_process.h"
 #include "game/revc.h"
 #include "network/net_client.h"
+#include "pools/player_pool.h"
 #include "render/overlay.h"
 
 namespace {
@@ -116,7 +117,8 @@ DWORD WINAPI InitThread(LPVOID) {
         // Оверлей поверх D3D9 (панель ImGui, F7).
         if (!vc::render::InstallOverlayHooks(log))
             LogLine(log, "vc-client: оверлей не установился (см. выше), игра продолжается без него\n");
-        // Сеть: подключение к серверу из vc-client.ini (Tick идёт из хука кадра).
+        // Пул сетевых кукол (хук ProcessControl) и сеть из vc-client.ini.
+        vc::pools::PlayerPool::Instance().Init(log);
         vc::network::NetClient::Instance().Init(log, DllDirectory() + "vc-client.ini");
         // Лог НЕ закрываем: хуки пишут в него из игрового потока всю сессию.
     } else {

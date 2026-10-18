@@ -103,10 +103,12 @@ void Send(vc::net::UdpSocket& socket, Session& session,
 }
 
 void Broadcast(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
-               const std::vector<std::uint8_t>& payload, const Session* except = nullptr) {
+               const std::vector<std::uint8_t>& payload, const Session* except = nullptr,
+               vc::net::Reliability reliability = vc::net::Reliability::ReliableOrdered,
+               std::uint8_t channel = 0) {
     for (auto& [key, session] : sessions) {
         if (!session.joined || &session == except) continue;
-        Send(socket, session, payload, vc::net::Reliability::ReliableOrdered, 0);
+        Send(socket, session, payload, reliability, channel);
     }
 }
 
@@ -131,6 +133,8 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildServerMessage(session.nick + " вышел с сервера"),
                       &session);
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
         }
         return true;
     }
@@ -171,6 +175,18 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildServerMessage(session.nick + " подключился к серверу"),
                       &session);
+            // Этап 3: новичку — все существующие игроки, остальным — новичок.
+            for (auto& [otherKey, other] : sessions) {
+                if (!other.joined || &other == &session) continue;
+                Send(socket, session,
+                     vc::protocol::BuildPlayerStreamIn(
+                         {other.playerId, other.nick, other.position}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+            }
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildPlayerStreamIn(
+                          {session.playerId, session.nick, session.position}),
+                      &session);
         }
         Send(socket, session,
              vc::protocol::BuildConnectionAccepted({session.playerId, g_config.maxPlayers}),
@@ -190,6 +206,10 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::OnFootSync)) {
         if (const auto pos = vc::protocol::ParseOnFootSync(payload)) {
             session.position = *pos;
+            // Ретрансляция остальным — из этих пакетов клиенты двигают кукол.
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildPlayerSyncUpdate({session.playerId, *pos}), &session,
+                      vc::net::Reliability::UnreliableSequenced, 1);
             const float dx = pos->x - session.lastLoggedPosition.x;
             const float dy = pos->y - session.lastLoggedPosition.y;
             const float dz = pos->z - session.lastLoggedPosition.z;
@@ -313,6 +333,8 @@ int main(int argc, char** argv) {
                               vc::protocol::BuildServerMessage(session.nick +
                                                                 " вышел с сервера"),
                               &session);
+                    Broadcast(socket, sessions,
+                              vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
                 }
                 it = sessions.erase(it);
             } else {

@@ -167,4 +167,62 @@ std::optional<Vector3> ParseOnFootSync(const std::vector<std::uint8_t>& payload)
     return v;
 }
 
+std::vector<std::uint8_t> BuildPlayerStreamIn(const PlayerStreamInData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::PlayerStreamIn));
+    w.U16(data.playerId);
+    w.Str8(data.nick);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    return w.out;
+}
+
+std::optional<PlayerStreamInData> ParsePlayerStreamIn(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::PlayerStreamIn))) return std::nullopt;
+    PlayerStreamInData data;
+    data.playerId = r.U16();
+    data.nick = r.Str8();
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildPlayerStreamOut(std::uint16_t playerId) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::PlayerStreamOut));
+    w.U16(playerId);
+    return w.out;
+}
+
+std::optional<std::uint16_t> ParsePlayerStreamOut(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::PlayerStreamOut))) return std::nullopt;
+    const std::uint16_t id = r.U16();
+    if (!r.ok) return std::nullopt;
+    return id;
+}
+
+std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::PlayerSyncUpdate));
+    w.U16(data.playerId);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    return w.out;
+}
+
+std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::PlayerSyncUpdate))) return std::nullopt;
+    PlayerSyncUpdateData data;
+    data.playerId = r.U16();
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
 } // namespace vc::protocol

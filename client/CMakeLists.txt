@@ -33,6 +33,7 @@ add_library(vc-client SHARED
     src/dllmain.cpp
     src/game/hooks/hook_cgame_process.cpp
     src/network/net_client.cpp
+    src/pools/player_pool.cpp
     src/render/overlay.cpp
 )
 set_target_properties(vc-client PROPERTIES OUTPUT_NAME "vc-client")

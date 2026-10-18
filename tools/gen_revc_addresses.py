@@ -53,6 +53,9 @@ CURATED = [
     ("kCPadUpdatePads", "?UpdatePads@CPad@@SAXXZ", "void CPad::UpdatePads() — будущее отключение ввода"),
     ("kCPadNewKeyState", "?NewKeyState@CPad@@2VCKeyboardState@@A", "CKeyboardState CPad::NewKeyState"),
     ("kCKeyboardStateClear", "?Clear@CKeyboardState@@QEAAXXZ", "void CKeyboardState::Clear()"),
+    ("kCPoolPedNew", "?New@?$CPool@VCPed@@VCPlayerPed@@@@QEAAPEAVCPed@@XZ", "CPed* CPool<CPed>::New() — аллокация слота педа"),
+    ("kCPedProcessControl", "?ProcessControl@CPed@@UEAAXXZ", "void CPed::ProcessControl() — хук отключает ИИ сетевых кукол"),
+    ("kCPlaceableSetHeading", "?SetHeading@CPlaceable@@QEAAXM@Z", "void CPlaceable::SetHeading(float) — на будущее"),
 ]
 
 

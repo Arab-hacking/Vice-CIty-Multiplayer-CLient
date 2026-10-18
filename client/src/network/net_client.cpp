@@ -120,7 +120,35 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
     } else if (auto message = vc::protocol::ParseServerMessage(payload)) {
         PushChatLine(*message);
         Log("net[chat]: " + *message + "\n");
+    } else if (auto streamIn = vc::protocol::ParsePlayerStreamIn(payload)) {
+        std::lock_guard lock(m_mutex);
+        RemotePlayer& remote = m_remotePlayers[streamIn->playerId];
+        remote.id = streamIn->playerId;
+        remote.nick = streamIn->nick;
+        remote.targetPosition = streamIn->position;
+        remote.hasPosition = true;
+        Log("net: stream-in игрока " + streamIn->nick + " (id " +
+            std::to_string(streamIn->playerId) + ")\n");
+    } else if (auto streamOut = vc::protocol::ParsePlayerStreamOut(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remotePlayers.erase(*streamOut);
+        Log("net: stream-out игрока id " + std::to_string(*streamOut) + "\n");
+    } else if (auto update = vc::protocol::ParsePlayerSyncUpdate(payload)) {
+        std::lock_guard lock(m_mutex);
+        auto it = m_remotePlayers.find(update->playerId);
+        if (it != m_remotePlayers.end()) {
+            it->second.targetPosition = update->position;
+            it->second.hasPosition = true;
+        }
     }
+}
+
+std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
+    std::lock_guard lock(m_mutex);
+    std::vector<RemotePlayer> out;
+    out.reserve(m_remotePlayers.size());
+    for (const auto& [id, remote] : m_remotePlayers) out.push_back(remote);
+    return out;
 }
 
 void NetClient::ThreadMain() {

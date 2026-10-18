@@ -59,7 +59,10 @@ int main(int argc, char** argv) {
     std::uint16_t myId = 0;
     const std::uint64_t started = NowMs();
     std::uint64_t lastSync = 0;
-    float walkX = -378.0f;
+    // Ходим туда-сюда перед особняком Версетти (ровная площадка, z ~17.3):
+    // игрок спавнится рядом (-378, -589) и сразу видит куклу бота.
+    float walkX = -395.0f;
+    float walkDir = 1.0f;
 
     while (NowMs() - started < static_cast<std::uint64_t>(seconds) * 1000 + 5000) {
         if (auto received = socket.Receive(50)) {
@@ -73,6 +76,11 @@ int main(int argc, char** argv) {
                     std::fflush(stdout);
                 } else if (auto msg = vc::protocol::ParseServerMessage(payload)) {
                     std::printf("[server] %s\n", msg->c_str());
+                    std::fflush(stdout);
+                } else if (auto si = vc::protocol::ParsePlayerStreamIn(payload)) {
+                    std::printf("[bot] вижу игрока %s (id %u) в (%.1f, %.1f, %.1f)\n",
+                                si->nick.c_str(), si->playerId, si->position.x,
+                                si->position.y, si->position.z);
                     std::fflush(stdout);
                 } else if (auto rej = vc::protocol::ParseConnectionRejected(payload)) {
                     std::printf("vc-bot: ОТКАЗ: %s\n", rej->c_str());
@@ -91,8 +99,10 @@ int main(int argc, char** argv) {
         }
         if (accepted && NowMs() - lastSync >= 100) {
             lastSync = NowMs();
-            walkX += 0.7f;
-            send(vc::protocol::BuildOnFootSync({walkX, -540.0f, 17.0f}),
+            walkX += walkDir * 0.55f; // ~5.5 м/с — скорость бега
+            if (walkX > -360.0f) walkDir = -1.0f;
+            if (walkX < -395.0f) walkDir = 1.0f;
+            send(vc::protocol::BuildOnFootSync({walkX, -542.0f, 17.3f}),
                  vc::net::Reliability::UnreliableSequenced, 1);
             if (NowMs() - started > static_cast<std::uint64_t>(seconds) * 1000) break;
         }

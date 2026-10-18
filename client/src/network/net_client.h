@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -38,6 +39,15 @@ public:
     [[nodiscard]] std::string StatusText() const;
     [[nodiscard]] std::vector<std::string> ChatLines() const;
 
+    // Удалённые игроки, о которых сообщил сервер (для пула кукол в игровом потоке).
+    struct RemotePlayer {
+        std::uint16_t id = 0;
+        std::string nick;
+        vc::Vector3 targetPosition{};
+        bool hasPosition = false;
+    };
+    [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
+
 private:
     NetClient() = default;
     void ThreadMain();
@@ -65,6 +75,7 @@ private:
     std::vector<std::string> m_chatLines;
     std::vector<std::string> m_chatOutbox;
     std::optional<vc::Vector3> m_latestPosition;
+    std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
 };
 
 } // namespace vc::network
