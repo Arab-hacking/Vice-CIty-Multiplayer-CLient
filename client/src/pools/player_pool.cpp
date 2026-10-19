@@ -127,7 +127,9 @@ bool EnsureModelReady(int modelId) {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "pool: запрашиваю модель %d\n", modelId);
         Log(buf);
-        game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(modelId, 0);
+        // Флаги 3 = DONT_REMOVE|SCRIPTOWNED: иначе стриминг выгрузит модель
+        // редкого скина и кукла станет невидимой (см. vehicle_pool.cpp).
+        game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(modelId, 3);
         return false;
     }
     if (it->second < kModelWarmupFrames) {
