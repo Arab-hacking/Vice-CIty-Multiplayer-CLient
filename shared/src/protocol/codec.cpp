@@ -150,21 +150,24 @@ std::optional<std::string> ParseChatMessage(const std::vector<std::uint8_t>& pay
     return ParseTextPacket(payload, static_cast<std::uint8_t>(ClientPacket::ChatMessage));
 }
 
-std::vector<std::uint8_t> BuildOnFootSync(const Vector3& position) {
+std::vector<std::uint8_t> BuildOnFootSync(const OnFootSyncData& data) {
     Writer w;
     w.U8(static_cast<std::uint8_t>(ClientPacket::OnFootSync));
-    w.F32(position.x);
-    w.F32(position.y);
-    w.F32(position.z);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    w.U8(data.health);
     return w.out;
 }
 
-std::optional<Vector3> ParseOnFootSync(const std::vector<std::uint8_t>& payload) {
+std::optional<OnFootSyncData> ParseOnFootSync(const std::vector<std::uint8_t>& payload) {
     Reader r{payload};
     if (!r.ExpectId(static_cast<std::uint8_t>(ClientPacket::OnFootSync))) return std::nullopt;
-    Vector3 v{r.F32(), r.F32(), r.F32()};
+    OnFootSyncData data;
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    data.health = r.U8();
     if (!r.ok) return std::nullopt;
-    return v;
+    return data;
 }
 
 std::vector<std::uint8_t> BuildPlayerStreamIn(const PlayerStreamInData& data) {
@@ -211,6 +214,7 @@ std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data
     w.F32(data.position.x);
     w.F32(data.position.y);
     w.F32(data.position.z);
+    w.U8(data.health);
     return w.out;
 }
 
@@ -221,6 +225,7 @@ std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
     PlayerSyncUpdateData data;
     data.playerId = r.U16();
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    data.health = r.U8();
     if (!r.ok) return std::nullopt;
     return data;
 }

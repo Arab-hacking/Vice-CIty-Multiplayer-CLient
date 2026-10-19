@@ -116,6 +116,19 @@ void DrawNametags() {
         const ImVec2 at(sx - size.x * 0.5f, sy - size.y);
         draw->AddText(ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 220), info.nick.c_str());
         draw->AddText(at, IM_COL32(255, 255, 255, 255), info.nick.c_str());
+        // HP-плашка под ником: чёрный фон + заливка красный->зелёный по процентам.
+        constexpr float kBarW = 38.0f, kBarH = 5.0f;
+        const float barX = sx - kBarW * 0.5f;
+        const float barY = at.y + size.y + 2.0f;
+        float pct = static_cast<float>(info.health) / 100.0f;
+        if (pct < 0.0f) pct = 0.0f;
+        if (pct > 1.0f) pct = 1.0f;
+        draw->AddRectFilled(ImVec2(barX - 1, barY - 1), ImVec2(barX + kBarW + 1, barY + kBarH + 1),
+                            IM_COL32(0, 0, 0, 190));
+        const auto hpColor = IM_COL32(static_cast<int>(255.0f * (1.0f - pct)),
+                                      static_cast<int>(220.0f * pct), 40, 255);
+        draw->AddRectFilled(ImVec2(barX, barY), ImVec2(barX + kBarW * pct, barY + kBarH),
+                            hpColor);
     }
 }
 

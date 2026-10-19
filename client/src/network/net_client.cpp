@@ -92,9 +92,11 @@ void NetClient::ShutdownBestEffort() {
     }
 }
 
-void NetClient::SetPlayerPosition(const std::optional<vc::Vector3>& position) {
+void NetClient::SetPlayerState(const std::optional<vc::Vector3>& position,
+                               std::uint8_t health) {
     std::lock_guard lock(m_mutex);
     m_latestPosition = position;
+    m_latestHealth = health;
 }
 
 void NetClient::SendChat(const std::string& text) {
@@ -141,6 +143,7 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         if (it != m_remotePlayers.end()) {
             it->second.targetPosition = update->position;
             it->second.hasPosition = true;
+            it->second.health = update->health;
             ++it->second.syncCount;
         }
     }
@@ -206,12 +209,14 @@ void NetClient::ThreadMain() {
         if (m_state.load() == State::Connected && now - lastSyncMs >= 100) {
             lastSyncMs = now;
             std::optional<vc::Vector3> position;
+            std::uint8_t health = 100;
             {
                 std::lock_guard lock(m_mutex);
                 position = m_latestPosition;
+                health = m_latestHealth;
             }
             if (position) {
-                SendPayloadLockedPeer(vc::protocol::BuildOnFootSync(*position),
+                SendPayloadLockedPeer(vc::protocol::BuildOnFootSync({*position, health}),
                                       vc::net::Reliability::UnreliableSequenced, 1, now);
             } else if (now - lastKeepAliveMs >= 3000) {
                 // Игрок не заспавнен (меню/пауза) — просто держим сессию живой.

@@ -18,6 +18,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../../core/seh_guard.h"
 #include "../../network/net_client.h"
 #include "../../pools/player_pool.h"
 #include "../../render/overlay.h"
@@ -34,6 +35,16 @@ CGameProcessFn g_original = nullptr;
 FILE* g_log = nullptr;
 std::uint64_t g_frame = 0;
 
+// Чтение HP педа (CPed::m_fHealth, смещение из дизассемблера) под SEH.
+bool SafeReadPedHealth(void* ped, float* out) {
+    VC_TRY {
+        *out = *reinterpret_cast<float*>(static_cast<char*>(ped) + kPedHealthOffset);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 void OnFrameAfterOriginal() {
     ++g_frame;
 
@@ -42,11 +53,17 @@ void OnFrameAfterOriginal() {
     auto findCoors = Resolve<FindPlayerCoorsFn>(revc::kFindPlayerCoors);
     void* ped = findPed ? findPed() : nullptr;
     std::optional<vc::Vector3> position;
+    std::uint8_t health = 100;
     if (ped) {
         const CVector p = findCoors();
         position = vc::Vector3{p.x, p.y, p.z};
+        float hp = 100.0f;
+        if (SafeReadPedHealth(ped, &hp) && hp >= 0.0f && hp <= 1000.0f) {
+            if (hp > 200.0f) hp = 200.0f; // VC: максимум с прокачкой ~200
+            health = static_cast<std::uint8_t>(hp);
+        }
     }
-    vc::network::NetClient::Instance().SetPlayerPosition(position);
+    vc::network::NetClient::Instance().SetPlayerState(position, health);
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
 
     // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).

@@ -94,6 +94,7 @@ struct Session {
     bool hasPosition = false;
     float moveDirX = 0.0f; // последнее направление движения (бот встаёт перед игроком)
     float moveDirY = 1.0f;
+    std::uint8_t health = 100;
     std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
@@ -345,28 +346,32 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (!session.joined) return false;
 
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::OnFootSync)) {
-        if (const auto pos = vc::protocol::ParseOnFootSync(payload)) {
+        if (const auto sync = vc::protocol::ParseOnFootSync(payload)) {
+            const vc::Vector3& pos = sync->position;
             {
-                const float mdx = pos->x - session.position.x;
-                const float mdy = pos->y - session.position.y;
+                const float mdx = pos.x - session.position.x;
+                const float mdy = pos.y - session.position.y;
                 const float len = std::sqrt(mdx * mdx + mdy * mdy);
                 if (session.hasPosition && len > 0.25f && len < 30.0f) {
                     session.moveDirX = mdx / len;
                     session.moveDirY = mdy / len;
                 }
             }
-            session.position = *pos;
+            session.position = pos;
+            session.health = sync->health;
             session.hasPosition = true;
             // Ретрансляция зрителям в радиусе — из этих пакетов клиенты двигают кукол.
-            SendSyncToViewers(socket, sessions, session.playerId,
-                              vc::protocol::BuildPlayerSyncUpdate({session.playerId, *pos}));
-            const float dx = pos->x - session.lastLoggedPosition.x;
-            const float dy = pos->y - session.lastLoggedPosition.y;
-            const float dz = pos->z - session.lastLoggedPosition.z;
+            SendSyncToViewers(
+                socket, sessions, session.playerId,
+                vc::protocol::BuildPlayerSyncUpdate({session.playerId, pos, sync->health}));
+            const float dx = pos.x - session.lastLoggedPosition.x;
+            const float dy = pos.y - session.lastLoggedPosition.y;
+            const float dz = pos.z - session.lastLoggedPosition.z;
             if (dx * dx + dy * dy + dz * dz > 25.0f) {
-                session.lastLoggedPosition = *pos;
-                std::printf("[sync] %s (id %u) pos=(%.1f, %.1f, %.1f)\n",
-                            session.nick.c_str(), session.playerId, pos->x, pos->y, pos->z);
+                session.lastLoggedPosition = pos;
+                std::printf("[sync] %s (id %u) pos=(%.1f, %.1f, %.1f) HP=%u\n",
+                            session.nick.c_str(), session.playerId, pos.x, pos.y, pos.z,
+                            sync->health);
                 std::fflush(stdout);
             }
         }
@@ -514,8 +519,9 @@ int main(int argc, char** argv) {
                 bot.phase += 0.12f; // ~1.2 рад/с -> скорость ~3.6 м/с
                 bot.position = {bot.center.x + std::cos(bot.phase) * 3.0f,
                                 bot.center.y + std::sin(bot.phase) * 3.0f, bot.center.z};
-                SendSyncToViewers(socket, sessions, bot.id,
-                                  vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position}));
+                SendSyncToViewers(
+                    socket, sessions, bot.id,
+                    vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position, 100}));
             }
         }
     }

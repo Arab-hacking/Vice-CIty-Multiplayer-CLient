@@ -46,9 +46,14 @@ struct ConnectionAcceptedData {
 [[nodiscard]] std::optional<std::string> ParseChatMessage(
     const std::vector<std::uint8_t>& payload);
 
-// OnFootSync: [10][f32 x][f32 y][f32 z] — позиция локального игрока на сервер.
-[[nodiscard]] std::vector<std::uint8_t> BuildOnFootSync(const Vector3& position);
-[[nodiscard]] std::optional<Vector3> ParseOnFootSync(const std::vector<std::uint8_t>& payload);
+// OnFootSync: [10][f32 x,y,z][u8 health] — позиция и здоровье локального игрока.
+struct OnFootSyncData {
+    Vector3 position{};
+    std::uint8_t health = 100;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildOnFootSync(const OnFootSyncData& data);
+[[nodiscard]] std::optional<OnFootSyncData> ParseOnFootSync(
+    const std::vector<std::uint8_t>& payload);
 
 // PlayerStreamIn: [105][u16 id][u8 nickLen][nick][f32 x,y,z] — создать куклу игрока.
 struct PlayerStreamInData {
@@ -65,10 +70,11 @@ struct PlayerStreamInData {
 [[nodiscard]] std::optional<std::uint16_t> ParsePlayerStreamOut(
     const std::vector<std::uint8_t>& payload);
 
-// PlayerSyncUpdate: [107][u16 id][f32 x,y,z] — позиция чужого игрока (ретрансляция сервера).
+// PlayerSyncUpdate: [107][u16 id][f32 x,y,z][u8 health] — позиция и HP чужого игрока.
 struct PlayerSyncUpdateData {
     std::uint16_t playerId = 0;
     Vector3 position{};
+    std::uint8_t health = 100;
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data);
 [[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(

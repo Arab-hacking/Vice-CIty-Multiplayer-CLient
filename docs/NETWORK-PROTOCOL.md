@@ -71,7 +71,7 @@ align до байта, тело пакета         игровые пакеты
 | `ConnectionRejected` (104) | С→К | ReliableOrdered/0 | `u16 len, reason` |
 | `ServerMessage` (130) | С→К | ReliableOrdered/0 | `u16 len, text` |
 | `ChatMessage` (20) | К→С | ReliableOrdered/0 | `u16 len, text` (сервер ретранслирует как ServerMessage всем) |
-| `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x, f32 y, f32 z` (расширится на Этапе 3) |
+| `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x,y,z, u8 health` (протокол v3) |
 | `KeepAlive` (22) | К→С | Unreliable/0, раз в 3 с без спавна | пустой |
 | `Disconnect` (34) | К→С | Unreliable/0 | пустой — сервер сразу закрывает сессию (иначе по таймауту 15 с) |
 
@@ -88,7 +88,7 @@ align до байта, тело пакета         игровые пакеты
 |---|---|---|---|
 | `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u8 nickLen, nick, f32 x,y,z` — создать куклу |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |
-| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z` — ретрансляция чужого OnFootSync |
+| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z, u8 health` — ретрансляция чужого OnFootSync (только зрителям в радиусе 250 м) |
 
 Сервер шлёт StreamIn новичку обо всех онлайн и всем о новичке; стриминга по радиусу
 пока нет (все видят всех). Клиент спавнит `CCivilianPed` (модель 7) через пул игры,

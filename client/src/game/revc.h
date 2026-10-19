@@ -25,4 +25,14 @@ struct CVector {
 using FindPlayerPedFn = void* (*)();
 using FindPlayerVehicleFn = void* (*)();
 
+// Смещения полей, добытые дизассемблером из целевого reVC.exe (эта сборка!):
+//  - CPlaceable-подобъект внутри CEntity/CPed: +0x08 (CMatrix там же);
+//    методы CPlaceable (SetHeading) принимают this = ped+8, НЕ ped.
+//  - CPed::m_fHealth = ped+0x454, m_fArmour = ped+0x458
+//    (CPed::InflictDamage: armour+health сравнивается с уроном;
+//     CPed::SetMoveAnim проверяет [ped+0x454] > 0 как «жив»).
+inline constexpr std::uintptr_t kPlaceableOffset = 0x08;
+inline constexpr std::uintptr_t kPedHealthOffset = 0x454;
+inline constexpr std::uintptr_t kPedArmourOffset = 0x458;
+
 } // namespace vc::game

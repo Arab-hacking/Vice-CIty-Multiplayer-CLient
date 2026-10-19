@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@ namespace vc::pools {
 struct PuppetRenderInfo {
     std::string nick;
     vc::Vector3 position{}; // текущая (интерполированная) позиция куклы
+    std::uint8_t health = 100;
 };
 
 class PlayerPool {

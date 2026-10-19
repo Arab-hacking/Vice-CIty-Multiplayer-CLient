@@ -121,4 +121,7 @@ inline constexpr std::uintptr_t kCPedSetMoveState = 0x001E9E00u;
 // void CEntity::UpdateRwFrame() — пересчёт матрицы Rw-клампа (без него модель не едет за позицией)
 inline constexpr std::uintptr_t kCEntityUpdateRwFrame = 0x00151090u;
 
+// void CPed::SetMoveAnim() — применяет анимацию по m_nMoveState (сам проверяет смену)
+inline constexpr std::uintptr_t kCPedSetMoveAnim = 0x001E99D0u;
+
 } // namespace vc::game::revc

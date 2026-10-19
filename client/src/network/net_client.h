@@ -31,7 +31,7 @@ public:
     void ShutdownBestEffort();
 
     // Вызывается из игрового потока каждый кадр.
-    void SetPlayerPosition(const std::optional<vc::Vector3>& position);
+    void SetPlayerState(const std::optional<vc::Vector3>& position, std::uint8_t health);
     void SendChat(const std::string& text);
 
     [[nodiscard]] State GetState() const { return m_state.load(); }
@@ -45,6 +45,7 @@ public:
         std::string nick;
         vc::Vector3 targetPosition{};
         bool hasPosition = false;
+        std::uint8_t health = 100;
         std::uint32_t syncCount = 0; // диагностика: сколько SyncUpdate пришло
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
@@ -77,6 +78,7 @@ private:
     std::vector<std::string> m_chatLines;
     std::vector<std::string> m_chatOutbox;
     std::optional<vc::Vector3> m_latestPosition;
+    std::uint8_t m_latestHealth = 100;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
 };
 

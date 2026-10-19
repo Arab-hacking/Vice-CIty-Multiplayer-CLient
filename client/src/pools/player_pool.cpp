@@ -29,6 +29,23 @@ using PoolNewFn = void* (*)(void*);
 using CivilianCtorFn = void* (*)(void*, int, unsigned int);
 using TeleportFn = void (*)(void*, game::CVector);
 using UpdateRwFrameFn = void (*)(void*);
+using SetHeadingFn = void (*)(void*, float);
+using SetMoveStateFn = void (*)(void*, int);
+using SetMoveAnimFn = void (*)(void*);
+
+// eMoveState в reVC: NONE=0, STILL=1, WALK=2, RUN=3, SPRINT=4.
+constexpr int kMoveStill = 1;
+constexpr int kMoveWalk = 2;
+constexpr int kMoveRun = 3;
+constexpr float kPi = 3.14159265f;
+
+// Кратчайший доворот угла.
+float LerpAngle(float from, float to, float t) {
+    float diff = to - from;
+    while (diff > kPi) diff -= 2.0f * kPi;
+    while (diff < -kPi) diff += 2.0f * kPi;
+    return from + diff * t;
+}
 
 // Перемещение куклы (POD SEH-обёртка вокруг сырых оффсетов).
 // Факты из дизассемблера reVC.exe этой сборки:
@@ -41,21 +58,28 @@ using UpdateRwFrameFn = void (*)(void*);
 //    LTM пересчитается при рендере из матрицы ФРЕЙМА.
 // Поэтому: Teleport + копируем встроенную матрицу (64 байта) в матрицу фрейма
 // + UpdateRwFrame. Без копирования модель навсегда стоит на точке спавна.
-bool MovePuppetRaw(void* ped, float x, float y, float z) {
+bool MovePuppetRaw(void* ped, float x, float y, float z, float heading, int moveState) {
     VC_TRY {
         game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(ped, game::CVector{x, y, z});
         auto* base = static_cast<char*>(ped);
+        // CPlaceable::SetHeading принимает this = ped+8 (подобъект), НЕ ped!
+        game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(
+            base + game::kPlaceableOffset, heading);
         void* frameMatrix = *reinterpret_cast<void**>(base + 0x48); // CMatrix::pMatrix
         if (frameMatrix) std::memcpy(frameMatrix, base + 0x08, 0x40);
         game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(ped);
+        // Анимация ног: SetMoveState пишет поле, SetMoveAnim применяет анимацию
+        // (сам проверяет, сменилось ли состояние — можно звать каждый кадр).
+        game::Resolve<SetMoveStateFn>(game::revc::kCPedSetMoveState)(ped, moveState);
+        game::Resolve<SetMoveAnimFn>(game::revc::kCPedSetMoveAnim)(ped);
         return true;
     } VC_EXCEPT {
         return false;
     }
 }
 
-void MovePuppet(void* ped, const vc::Vector3& position) {
-    MovePuppetRaw(ped, position.x, position.y, position.z);
+void MovePuppet(void* ped, const vc::Vector3& position, float heading, int moveState) {
+    MovePuppetRaw(ped, position.x, position.y, position.z, heading, moveState);
 }
 using WorldAddRemoveFn = void (*)(void*);
 using RequestModelFn = void (*)(int, int);
@@ -74,6 +98,8 @@ struct Puppet {
     void* ped = nullptr;
     std::string nick;
     vc::Vector3 current{};
+    float heading = 0.0f;
+    std::uint8_t health = 100;
 };
 
 std::map<std::uint16_t, Puppet> g_puppets;
@@ -123,7 +149,7 @@ void* CreatePuppet(const vc::Vector3& position) {
     void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
         memory, kPedTypeCivMale, static_cast<unsigned int>(kPuppetModelId));
     if (!ped) return nullptr;
-    MovePuppet(ped, position);
+    MovePuppet(ped, position, 0.0f, kMoveStill);
     game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
     return ped;
 }
@@ -146,7 +172,7 @@ bool PlayerPool::IsPuppet(const void* ped) const { return g_puppetPeds.contains(
 std::vector<PuppetRenderInfo> PlayerPool::RenderInfos() const {
     std::vector<PuppetRenderInfo> out;
     for (const auto& [id, puppet] : g_puppets)
-        if (puppet.ped) out.push_back({puppet.nick, puppet.current});
+        if (puppet.ped) out.push_back({puppet.nick, puppet.current, puppet.health});
     return out;
 }
 
@@ -210,12 +236,14 @@ void PlayerPool::Tick() {
             Log(("pool: кукла создана для " + remote.nick + "\n").c_str());
             continue;
         }
+        puppet.health = remote.health;
         // Плавное движение к целевой точке; на больших дистанциях — телепорт.
         const vc::Vector3& target = remote.targetPosition;
         const float dx = target.x - puppet.current.x;
         const float dy = target.y - puppet.current.y;
         const float dz = target.z - puppet.current.z;
         const float distSq = dx * dx + dy * dy + dz * dz;
+        float frameSpeed = 0.0f;
         if (distSq > 30.0f * 30.0f) {
             puppet.current = target;
         } else {
@@ -223,8 +251,18 @@ void PlayerPool::Tick() {
             puppet.current.x += dx * kSmooth;
             puppet.current.y += dy * kSmooth;
             puppet.current.z += dz * kSmooth;
+            frameSpeed = std::sqrt(distSq) * kSmooth; // метры за кадр
         }
-        MovePuppet(puppet.ped, puppet.current);
+        // Поворот по направлению движения: вперёд = (-sin h, cos h).
+        const float flatDistSq = dx * dx + dy * dy;
+        if (flatDistSq > 0.04f * 0.04f) {
+            const float desired = std::atan2(-dx, dy);
+            puppet.heading = LerpAngle(puppet.heading, desired, 0.25f);
+        }
+        // Анимация по скорости (~60 fps): >0.09 м/кадр — бег, >0.015 — ходьба.
+        const int moveState =
+            frameSpeed > 0.09f ? kMoveRun : (frameSpeed > 0.015f ? kMoveWalk : kMoveStill);
+        MovePuppet(puppet.ped, puppet.current, puppet.heading, moveState);
 
         // Диагностика (0.6.3): раз в ~5 c печатаем цель/текущую/счётчик синков,
         // чтобы понять, где рвётся движение куклы.

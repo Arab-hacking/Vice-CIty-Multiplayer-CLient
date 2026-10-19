@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
             walkX += walkDir * 0.55f; // ~5.5 м/с — скорость бега
             if (walkX > -360.0f) walkDir = -1.0f;
             if (walkX < -395.0f) walkDir = 1.0f;
-            send(vc::protocol::BuildOnFootSync({walkX, -542.0f, 17.3f}),
+            send(vc::protocol::BuildOnFootSync({{walkX, -542.0f, 17.3f}, 100}),
                  vc::net::Reliability::UnreliableSequenced, 1);
             if (NowMs() - started > static_cast<std::uint64_t>(seconds) * 1000) break;
         }

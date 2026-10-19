@@ -199,9 +199,10 @@ void TestCodec() {
     const auto parsedMsg = vc::protocol::ParseServerMessage(msg);
     CHECK(parsedMsg && *parsedMsg == "Привет, Вайс-Сити!");
 
-    const auto sync = vc::protocol::BuildOnFootSync({-378.5f, -589.1f, 25.32f});
+    const auto sync = vc::protocol::BuildOnFootSync({{-378.5f, -589.1f, 25.32f}, 73});
     const auto parsedSync = vc::protocol::ParseOnFootSync(sync);
-    CHECK(parsedSync && parsedSync->x == -378.5f && parsedSync->y == -589.1f);
+    CHECK(parsedSync && parsedSync->position.x == -378.5f &&
+          parsedSync->position.y == -589.1f && parsedSync->health == 73);
 
     const auto streamIn = vc::protocol::BuildPlayerStreamIn({3, "Ken", {1.0f, 2.0f, 3.0f}});
     const auto parsedIn = vc::protocol::ParsePlayerStreamIn(streamIn);
@@ -211,9 +212,10 @@ void TestCodec() {
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);
 
-    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}});
+    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}, 42});
     const auto parsedUpd = vc::protocol::ParsePlayerSyncUpdate(upd);
-    CHECK(parsedUpd && parsedUpd->playerId == 3 && parsedUpd->position.x == -10.5f);
+    CHECK(parsedUpd && parsedUpd->playerId == 3 && parsedUpd->position.x == -10.5f &&
+          parsedUpd->health == 42);
 }
 
 } // namespace
