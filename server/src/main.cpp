@@ -121,9 +121,11 @@ struct Session {
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
 
-// Серверный NPC-бот (команда /bot): фейковый «игрок» без соединения.
+// Серверный NPC-бот (команды /bot и /dbot): фейковый «игрок» без соединения.
 // Сервер сам двигает его по кругу и рассылает SyncUpdate всем клиентам —
-// клиенты рисуют обычную куклу, vc-bot.exe больше не нужен.
+// клиенты рисуют обычную куклу, vc-bot.exe больше не нужен. /dbot — тот же
+// бот, но за рулём серверной машины: сервер крутит позу машины по кругу и
+// рассылает VehicleSyncUpdate, кукла сидит в салоне по VehicleOccupant.
 struct FakeBot {
     std::uint16_t id = 0;
     std::uint16_t ownerId = 0;
@@ -131,6 +133,8 @@ struct FakeBot {
     vc::Vector3 center{};
     vc::Vector3 position{};
     float phase = 0.0f;
+    bool driving = false;        // true: /dbot (круг на машине, радиус 12 м)
+    std::uint16_t vehicleId = 0; // машина бота-водителя (ownerId у неё = bot.id)
 };
 std::vector<FakeBot> g_bots;
 
@@ -274,20 +278,32 @@ std::size_t JoinedCount(const std::map<std::string, Session>& sessions) {
     return n;
 }
 
+// Определены ниже; нужны RemoveBotOf для машины бота-водителя.
+void BroadcastOccupant(vc::net::UdpSocket& socket,
+                       std::map<std::string, Session>& sessions, std::uint16_t vehicleId,
+                       std::uint16_t playerId, std::uint8_t seat);
+void RemoveVehiclesOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
+                      std::uint16_t ownerId);
+
 void RemoveBotOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                  std::uint16_t ownerId) {
     const auto it = std::find_if(g_bots.begin(), g_bots.end(),
                                  [&](const FakeBot& b) { return b.ownerId == ownerId; });
     if (it == g_bots.end()) return;
     const std::uint16_t botId = it->id;
+    const std::uint16_t botVehicleId = it->driving ? it->vehicleId : 0;
     std::printf("[server] Бот %s (id %u) убран\n", it->nick.c_str(), botId);
     std::fflush(stdout);
     g_bots.erase(it);
+    if (botVehicleId != 0)
+        BroadcastOccupant(socket, sessions, botVehicleId, botId,
+                          vc::protocol::kSeatVacated);
     for (auto& [key, session] : sessions) {
         if (session.streamedIn.erase(botId) > 0 && session.joined)
             Send(socket, session, vc::protocol::BuildPlayerStreamOut(botId),
                  vc::net::Reliability::ReliableOrdered, 0);
     }
+    if (botVehicleId != 0) RemoveVehiclesOf(socket, sessions, botId);
 }
 
 // Сообщить зрителям машины об изменении occupancy (seat=255 — вышел).
@@ -330,16 +346,23 @@ void RemoveVehiclesOf(vc::net::UdpSocket& socket, std::map<std::string, Session>
                      g_vehicles.end());
     for (std::uint16_t id : removed) {
         std::printf("[server] Машина id %u (владелец %u) убрана\n", id, ownerId);
-        for (auto& [key, session] : sessions)
+        for (auto& [key, session] : sessions) {
+            // Кто-то мог сидеть внутри (пассажир у бота-водителя): место
+            // больше не существует, сбрасываем, чтобы не осталось висячей ссылки.
+            if (session.inVehicleId == id) {
+                session.inVehicleId = 0;
+                session.inVehicleSeat = 0;
+            }
             if (session.streamedVehicles.erase(id) > 0 && session.joined)
                 Send(socket, session, vc::protocol::BuildVehicleStreamOut(id),
                      vc::net::Reliability::ReliableOrdered, 0);
+        }
     }
     if (!removed.empty()) std::fflush(stdout);
 }
 
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
-// Команды: /help, /bot, /unbot, /skin, /tp, /kill, /pos, /players.
+// Команды: /help, /bot, /dbot, /unbot, /car, /delcar, /skin, /tp, /kill, /pos, /players.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId, const std::string& text) {
     auto reply = [&](const std::string& msg) {
@@ -353,7 +376,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     ss >> cmd;
 
     if (cmd == "/help") {
-        reply("Команды: /bot - бот перед тобой, /unbot - убрать бота");
+        reply("Команды: /bot - пеший бот, /dbot [модель] - бот-водитель, /unbot - убрать");
         reply("/car [модель 130-236] - машина перед тобой, /delcar - убрать");
         reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
         reply("/kill - респавн, /pos - координаты, /players - онлайн");
@@ -369,6 +392,10 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         auto it = std::find_if(g_bots.begin(), g_bots.end(), [&](const FakeBot& b) {
             return b.ownerId == session.playerId;
         });
+        if (it != g_bots.end() && it->driving) {
+            RemoveBotOf(socket, sessions, session.playerId); // был водителем — пересоздадим пешим
+            it = g_bots.end();
+        }
         if (it == g_bots.end()) {
             FakeBot bot;
             bot.id = nextPlayerId++;
@@ -387,6 +414,66 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             it->position = front;
             reply("Бот перемещён перед тобой");
         }
+    } else if (cmd == "/dbot") {
+        if (!session.hasPosition) {
+            reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /dbot");
+            return;
+        }
+        int model = 141; // Infernus
+        ss >> model;
+        if (model < 130 || model > 236) {
+            reply("Использование: /dbot [модель 130-236], например /dbot 141 (Infernus)");
+            return;
+        }
+        // Круг радиусом 12 м вокруг точки в 16 м перед игроком: машина
+        // проезжает в ~4 м от него — удобно садиться пассажиром.
+        const vc::Vector3 center{session.position.x + session.moveDirX * 16.0f,
+                                 session.position.y + session.moveDirY * 16.0f,
+                                 session.position.z};
+        auto it = std::find_if(g_bots.begin(), g_bots.end(), [&](const FakeBot& b) {
+            return b.ownerId == session.playerId;
+        });
+        if (it != g_bots.end() && !it->driving) {
+            RemoveBotOf(socket, sessions, session.playerId); // был пешим — пересоздадим
+            it = g_bots.end();
+        }
+        if (it != g_bots.end()) {
+            // Бот-водитель уже есть: перенести круг и машину перед игрока.
+            it->center = center;
+            it->phase = 0.0f;
+            it->position = {center.x + 12.0f, center.y, center.z};
+            for (auto& v : g_vehicles)
+                if (v.id == it->vehicleId) {
+                    v.position = it->position;
+                    v.heading = 0.0f;
+                    v.quat[0] = v.quat[1] = v.quat[2] = 0.0f;
+                    v.quat[3] = 1.0f;
+                }
+            reply("Бот-водитель перемещён перед тобой");
+            return;
+        }
+        FakeBot bot;
+        bot.id = nextPlayerId++;
+        bot.ownerId = session.playerId;
+        bot.nick = "Driver_" + session.nick.substr(0, 9);
+        bot.center = center;
+        bot.driving = true;
+        bot.position = {center.x + 12.0f, center.y, center.z}; // phase = 0
+        ServerVehicle vehicle;
+        vehicle.id = g_nextVehicleId++;
+        vehicle.model = static_cast<std::uint16_t>(model);
+        vehicle.ownerId = bot.id; // уберётся вместе с ботом (RemoveBotOf)
+        vehicle.position = bot.position; // z — ноги; клиент добавит высоту покоя
+        vehicle.heading = 0.0f;          // касательная при phase=0 направлена на +Y
+        vehicle.seats[0] = bot.id;
+        bot.vehicleId = vehicle.id;
+        g_bots.push_back(bot);
+        g_vehicles.push_back(vehicle);
+        StreamTick(socket, sessions); // кукла, машина и occupant появятся сразу
+        reply("Бот-водитель " + bot.nick + " едет по кругу! Садись пассажиром. /unbot - убрать");
+        std::printf("[server] Создан бот-водитель %s (id %u, машина %u) для %s\n",
+                    bot.nick.c_str(), bot.id, vehicle.id, session.nick.c_str());
+        std::fflush(stdout);
     } else if (cmd == "/unbot") {
         RemoveBotOf(socket, sessions, session.playerId);
         reply("Бот убран");
@@ -552,7 +639,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                  std::to_string(g_config.maxPlayers)),
              vc::net::Reliability::ReliableOrdered, 0);
         Send(socket, session,
-             vc::protocol::BuildServerMessage("Команды в чате (T): /bot, /skin, /tp, /kill — "
+             vc::protocol::BuildServerMessage("Команды в чате (T): /bot, /dbot, /car, /skin — "
                                               "подробнее: /help"),
              vc::net::Reliability::ReliableOrdered, 0);
         // Спавн-пойнт: клиент применит телепорт, когда мир загрузится.
@@ -823,14 +910,45 @@ int main(int argc, char** argv) {
             StreamTick(socket, sessions);
         }
 
-        // Серверные боты (/bot): круг радиусом 3 м вокруг точки спавна, 10 Гц.
+        // Серверные боты, 10 Гц: пеший (/bot) — круг r=3 м; водитель (/dbot) —
+        // круг r=12 м на машине (поза + VehicleSyncUpdate зрителям машины).
         static std::uint64_t lastBotTick = 0;
         if (now - lastBotTick >= 100 && !g_bots.empty()) {
             lastBotTick = now;
             for (auto& bot : g_bots) {
-                bot.phase += 0.12f; // ~1.2 рад/с -> скорость ~3.6 м/с
-                bot.position = {bot.center.x + std::cos(bot.phase) * 3.0f,
-                                bot.center.y + std::sin(bot.phase) * 3.0f, bot.center.z};
+                if (bot.driving) {
+                    bot.phase += 0.05f; // 0.5 рад/с * 12 м -> ~6 м/с
+                    // z позы — матрица машины: ноги + ~1 м (как поза живого водителя).
+                    bot.position = {bot.center.x + std::cos(bot.phase) * 12.0f,
+                                    bot.center.y + std::sin(bot.phase) * 12.0f,
+                                    bot.center.z + 1.0f};
+                    for (auto& v : g_vehicles) {
+                        if (v.id != bot.vehicleId) continue;
+                        v.position = bot.position;
+                        v.heading = bot.phase; // касательная: forward=(-sin,cos)
+                        v.quat[0] = 0.0f;
+                        v.quat[1] = 0.0f;
+                        v.quat[2] = std::sin(bot.phase * 0.5f);
+                        v.quat[3] = std::cos(bot.phase * 0.5f);
+                        const auto update = vc::protocol::BuildVehicleSyncUpdate(
+                            {v.id, v.position, v.quat[0], v.quat[1], v.quat[2],
+                             v.quat[3]});
+                        for (auto& [key, other] : sessions) {
+                            if (!other.joined) continue;
+                            if (!other.streamedVehicles.contains(v.id)) continue;
+                            Send(socket, other, update,
+                                 vc::net::Reliability::UnreliableSequenced, 2);
+                        }
+                        break;
+                    }
+                } else {
+                    bot.phase += 0.12f; // ~1.2 рад/с -> скорость ~3.6 м/с
+                    bot.position = {bot.center.x + std::cos(bot.phase) * 3.0f,
+                                    bot.center.y + std::sin(bot.phase) * 3.0f,
+                                    bot.center.z};
+                }
+                // Пеший синк шлём и водителю: позиция = позиция машины,
+                // сидящая кукла его игнорирует, стриминг/неймтег не теряются.
                 SendSyncToViewers(
                     socket, sessions, bot.id,
                     vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position, 100}));
