@@ -33,3 +33,4 @@ reVC.pdb
 settings.json
 server.cfg
 !server/config/server.cfg.example
+__pycache__/
