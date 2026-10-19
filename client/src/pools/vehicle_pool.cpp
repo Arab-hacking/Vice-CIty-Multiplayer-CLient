@@ -54,6 +54,7 @@ struct SpawnedVehicle {
     int attempts = 0;                 // неудачных попыток создания
     long long nextRetryTick = 0;      // раньше этого кадра не повторять
     bool fellReported = false;        // watchdog уже ругался в лог
+    bool occupiedReported = false;    // удаление отложено из-за игрока внутри
 };
 
 std::map<std::uint16_t, SpawnedVehicle> g_vehicles;
@@ -159,6 +160,17 @@ bool VehicleStillOursRaw(void* vehicle, void* vtable, std::uint16_t model) {
 void* ReadVehicleVtableRaw(void* vehicle) {
     VC_TRY {
         return *reinterpret_cast<void**>(vehicle);
+    } VC_EXCEPT {
+        return nullptr;
+    }
+}
+
+// Машина, в которой сейчас сидит локальный игрок (FindPlayerVehicle), или null.
+// Такую удалять НЕЛЬЗЯ: деструктор под водителем = падение и WASTED.
+void* LocalPlayerVehicleRaw() {
+    VC_TRY {
+        auto find = game::Resolve<game::FindPlayerVehicleFn>(game::revc::kFindPlayerVehicle);
+        return find ? find() : nullptr;
     } VC_EXCEPT {
         return nullptr;
     }
@@ -270,6 +282,19 @@ void VehiclePool::Tick() {
             ++it;
             continue;
         }
+        // Игрок сидит в этой машине — удаление откладываем до выхода из неё.
+        if (it->second.vehicle && it->second.vehicle == LocalPlayerVehicleRaw()) {
+            if (!it->second.occupiedReported) {
+                it->second.occupiedReported = true;
+                char buf[96];
+                std::snprintf(buf, sizeof(buf),
+                              "vpool: машина id %u занята игроком — удаление отложено\n",
+                              it->first);
+                Log(buf);
+            }
+            ++it;
+            continue;
+        }
         if (it->second.vehicle) {
             DestroyVehicle(it->second, it->first);
             char buf[64];
@@ -286,7 +311,8 @@ void VehiclePool::Tick() {
 
     for (const auto& remote : remotes) {
         SpawnedVehicle& spawned = g_vehicles[remote.id];
-        if (spawned.vehicle && spawned.model != remote.model) {
+        if (spawned.vehicle && spawned.model != remote.model &&
+            spawned.vehicle != LocalPlayerVehicleRaw()) {
             DestroyVehicle(spawned, remote.id);
             spawned.attempts = 0;
         }

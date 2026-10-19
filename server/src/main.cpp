@@ -223,9 +223,16 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
                      vc::net::Reliability::ReliableOrdered, 0);
         session.streamedIn = desired;
 
-        // Машины стримятся тем же радиусом.
+        // Машины стримятся тем же радиусом. Исключение: владелец всегда видит
+        // свою — пока нет синка водителя, серверная позиция машины стоит на
+        // точке спавна, и уехавший на 250+ м владелец получал stream-out
+        // прямо за рулём (клиент удалял машину под ним -> WASTED).
         std::set<std::uint16_t> desiredVehicles;
         for (const auto& v : g_vehicles) {
+            if (v.ownerId == session.playerId) {
+                desiredVehicles.insert(v.id);
+                continue;
+            }
             const float dx = v.position.x - session.position.x;
             const float dy = v.position.y - session.position.y;
             const float dz = v.position.z - session.position.z;
