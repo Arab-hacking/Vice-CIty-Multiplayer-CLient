@@ -39,5 +39,17 @@ inline constexpr std::uintptr_t kPedArmourOffset = 0x458;
 // только первую, поэтому после перемещения копируем 0x40 байт первой во вторую.
 inline constexpr std::uintptr_t kEmbeddedMatrixOffset = 0x08;
 inline constexpr std::uintptr_t kFrameMatrixPtrOffset = 0x48;
+// Раскладка CEntity/CVehicle этой сборки (подтверждено исходниками reVC и
+// дизассемблером): флаги+тип+статус — один dword на +0x60 (тип биты 0-2,
+// статус биты 3-7, bUsesCollision бит 8, bIsStatic бит 10), m_modelIndex
+// int16 на +0x6C, CVehicle::m_nDoorLock на +0x2D8 (CARLOCK_UNLOCKED=1).
+inline constexpr std::uintptr_t kEntityFlagsOffset = 0x60;
+inline constexpr std::uintptr_t kEntityModelIndexOffset = 0x6C;
+inline constexpr std::uintptr_t kVehicleDoorLockOffset = 0x2D8;
+// CStreamingInfo: шаг массива 0x20, m_loadState на +0x10 (STREAMSTATE_LOADED=1),
+// m_flags на +0x11. HasModelLoaded(id) == (loadState == 1).
+inline constexpr std::uintptr_t kStreamingInfoStride = 0x20;
+inline constexpr std::uintptr_t kStreamingLoadStateOffset = 0x10;
+inline constexpr std::uint8_t kStreamStateLoaded = 1;
 
 } // namespace vc::game

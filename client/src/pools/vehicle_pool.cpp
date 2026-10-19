@@ -34,7 +34,6 @@ using LoadAllModelsFn = void (*)(bool);
 using DeletingDtorFn = void* (*)(void*, unsigned int);
 
 constexpr unsigned char kMissionVehicle = 2; // eCreatedBy: RANDOM=1, MISSION=2
-constexpr int kModelWarmupFrames = 30;
 // CStreaming НЕ держит модель за сущность (SetModelIndex без AddRef): модель без
 // флагов DONT_REMOVE(1)|SCRIPTOWNED(2) выгружается по LRU вместе с коллизией —
 // машина проваливается под землю и «исчезает». Трафик/парковки игра спасает
@@ -69,7 +68,22 @@ void Log(const char* text) {
     }
 }
 
-// True, когда модель запрошена и ей дали время загрузиться.
+// CStreaming::HasModelLoaded(id) по массиву ms_aInfoForModel (как в исходниках).
+bool ModelLoadedRaw(int modelId) {
+    VC_TRY {
+        const auto* info = game::Resolve<const char*>(game::revc::kCStreamingInfoArray);
+        if (!info || modelId < 0) return false;
+        const auto state = *reinterpret_cast<const std::uint8_t*>(
+            info + modelId * game::kStreamingInfoStride + game::kStreamingLoadStateOffset);
+        return state == game::kStreamStateLoaded;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// True, когда модель запрошена И реально загружена — именно так ждёт игра
+// (CCarGenerator::DoInternalProcessing: if (!HasModelLoaded) return).
+// Конструктор CAutomobile на незагруженной модели падает в SetupModelNodes.
 bool EnsureModelReady(int modelId) {
     auto [it, inserted] = g_modelWarmup.try_emplace(modelId, 0);
     if (inserted) {
@@ -78,14 +92,20 @@ bool EnsureModelReady(int modelId) {
         Log(buf);
         game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(
             modelId, kStreamFlagsKeep);
-        return false;
     }
-    if (it->second < kModelWarmupFrames) {
-        game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
-        ++it->second;
-        return false;
+    if (ModelLoadedRaw(modelId)) {
+        if (it->second >= 0) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "vpool: модель %d загружена за %d кадров\n",
+                          modelId, it->second);
+            Log(buf);
+            it->second = -1; // больше не логируем
+        }
+        return true;
     }
-    return true;
+    game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
+    if (it->second >= 0) ++it->second;
+    return false;
 }
 
 // Поза машины: позиция во встроенной матрице (pos = +0x38), SetHeading(this=+8)
@@ -164,6 +184,12 @@ void* CreateVehicleRaw(void* pool, int model, float x, float y, float z, float h
         float dist = game::Resolve<DistToBaseFn>(game::revc::kCEntityDistToBase)(vehicle);
         if (!(dist >= 0.0f && dist <= 3.0f)) dist = 0.5f;
         PlaceVehicleRaw(vehicle, x, y, z + dist, heading);
+        // Как CCarGenerator после конструктора: STATUS_ABANDONED (биты 3-7
+        // dword'а флагов = 4), bIsStatic=false (бит 10), двери не заперты.
+        auto* vbase = static_cast<char*>(vehicle);
+        auto* flags = reinterpret_cast<unsigned int*>(vbase + game::kEntityFlagsOffset);
+        *flags = (*flags & ~0xF8u & ~0x400u) | (4u << 3);
+        *reinterpret_cast<int*>(vbase + game::kVehicleDoorLockOffset) = 1;
         game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(vehicle);
         *failStage = 0;
         return vehicle;

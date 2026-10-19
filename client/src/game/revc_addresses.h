@@ -112,6 +112,9 @@ inline constexpr std::uintptr_t kCPoolVehicleNew = 0x002CA290u;
 // float CEntity::GetDistanceFromCentreOfMassToBaseOfModel() — высота покоя машины при спавне
 inline constexpr std::uintptr_t kCEntityDistToBase = 0x0014F7E0u;
 
+// CStreamingInfo CStreaming::ms_aInfoForModel[] — m_loadState по +0x10, шаг 0x20 (HasModelLoaded)
+inline constexpr std::uintptr_t kCStreamingInfoArray = 0x00624FA0u;
+
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 

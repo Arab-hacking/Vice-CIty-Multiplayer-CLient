@@ -89,7 +89,7 @@ using ProcessControlFn = void (*)(void*);
 using DeletingDtorFn = void* (*)(void*, unsigned int);
 
 constexpr int kPedTypeCivMale = 4;   // ePedType из reVC
-constexpr int kModelWarmupFrames = 30;
+
 
 FILE* g_log = nullptr;
 ProcessControlFn g_origProcessControl = nullptr;
@@ -120,7 +120,20 @@ void HookProcessControl(void* self) {
     g_origProcessControl(self);
 }
 
-// True, когда модель скина запрошена и ей дали время загрузиться.
+// CStreaming::HasModelLoaded(id) по массиву ms_aInfoForModel (как в исходниках).
+bool ModelLoadedRaw(int modelId) {
+    VC_TRY {
+        const auto* info = game::Resolve<const char*>(game::revc::kCStreamingInfoArray);
+        if (!info || modelId < 0) return false;
+        const auto state = *reinterpret_cast<const std::uint8_t*>(
+            info + modelId * game::kStreamingInfoStride + game::kStreamingLoadStateOffset);
+        return state == game::kStreamStateLoaded;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// True, когда модель скина запрошена И реально загружена (игра ждёт именно так).
 bool EnsureModelReady(int modelId) {
     auto [it, inserted] = g_modelWarmup.try_emplace(modelId, 0);
     if (inserted) {
@@ -130,14 +143,11 @@ bool EnsureModelReady(int modelId) {
         // Флаги 3 = DONT_REMOVE|SCRIPTOWNED: иначе стриминг выгрузит модель
         // редкого скина и кукла станет невидимой (см. vehicle_pool.cpp).
         game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(modelId, 3);
-        return false;
     }
-    if (it->second < kModelWarmupFrames) {
-        game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
-        ++it->second;
-        return false;
-    }
-    return true;
+    if (ModelLoadedRaw(modelId)) return true;
+    game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
+    ++it->second;
+    return false;
 }
 
 // POD SEH-создание педа: битый skin id не должен ронять игру.
