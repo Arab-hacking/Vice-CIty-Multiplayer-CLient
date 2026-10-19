@@ -42,21 +42,11 @@ public:
     // Удалённые игроки, о которых сообщил сервер (для пула кукол в игровом потоке).
     struct RemotePlayer {
         std::uint16_t id = 0;
-        std::uint16_t skin = 7;
         std::string nick;
         vc::Vector3 targetPosition{};
-        float heading = 0.0f;
         bool hasPosition = false;
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
-
-    // Телепорт локального игрока по команде сервера (спавн, /tp, /kill).
-    // Игровой поток забирает его, когда пед существует.
-    struct LocalTeleport {
-        vc::Vector3 position{};
-        float heading = 0.0f;
-    };
-    [[nodiscard]] std::optional<LocalTeleport> TakePendingTeleport();
 
 private:
     NetClient() = default;
@@ -86,7 +76,6 @@ private:
     std::vector<std::string> m_chatOutbox;
     std::optional<vc::Vector3> m_latestPosition;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
-    std::optional<LocalTeleport> m_pendingTeleport;
 };
 
 } // namespace vc::network

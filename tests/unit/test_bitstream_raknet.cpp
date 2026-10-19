@@ -203,24 +203,17 @@ void TestCodec() {
     const auto parsedSync = vc::protocol::ParseOnFootSync(sync);
     CHECK(parsedSync && parsedSync->x == -378.5f && parsedSync->y == -589.1f);
 
-    const auto streamIn =
-        vc::protocol::BuildPlayerStreamIn({3, 12, "Ken", {1.0f, 2.0f, 3.0f}, 1.5f});
+    const auto streamIn = vc::protocol::BuildPlayerStreamIn({3, "Ken", {1.0f, 2.0f, 3.0f}});
     const auto parsedIn = vc::protocol::ParsePlayerStreamIn(streamIn);
-    CHECK(parsedIn && parsedIn->playerId == 3 && parsedIn->skin == 12 &&
-          parsedIn->nick == "Ken" && parsedIn->position.z == 3.0f &&
-          parsedIn->heading == 1.5f);
+    CHECK(parsedIn && parsedIn->playerId == 3 && parsedIn->nick == "Ken" &&
+          parsedIn->position.z == 3.0f);
 
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);
 
-    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}, -0.5f});
+    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}});
     const auto parsedUpd = vc::protocol::ParsePlayerSyncUpdate(upd);
-    CHECK(parsedUpd && parsedUpd->playerId == 3 && parsedUpd->position.x == -10.5f &&
-          parsedUpd->heading == -0.5f);
-
-    const auto tp = vc::protocol::BuildTeleportPlayer({{-378.5f, -589.1f, 25.6f}, 0.25f});
-    const auto parsedTp = vc::protocol::ParseTeleportPlayer(tp);
-    CHECK(parsedTp && parsedTp->position.y == -589.1f && parsedTp->heading == 0.25f);
+    CHECK(parsedUpd && parsedUpd->playerId == 3 && parsedUpd->position.x == -10.5f);
 }
 
 } // namespace

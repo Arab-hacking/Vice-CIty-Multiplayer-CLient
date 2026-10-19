@@ -18,7 +18,6 @@
 #include <cstring>
 #include <vector>
 
-#include "../../core/seh_guard.h"
 #include "../../network/net_client.h"
 #include "../../pools/player_pool.h"
 #include "../../render/overlay.h"
@@ -35,20 +34,6 @@ CGameProcessFn g_original = nullptr;
 FILE* g_log = nullptr;
 std::uint64_t g_frame = 0;
 
-// SEH-обёртка: телепорт локального педа не должен ронять игру ни при каких условиях.
-// (Отдельная POD-функция без C++-объектов — иначе __try запрещён компилятором.)
-bool SafeTeleportLocalPed(void* ped, float x, float y, float z, float heading) {
-    using TeleportFn = void (*)(void*, CVector);
-    using SetHeadingFn = void (*)(void*, float);
-    VC_TRY {
-        Resolve<TeleportFn>(revc::kCPedTeleport)(ped, CVector{x, y, z});
-        Resolve<SetHeadingFn>(revc::kCPlaceableSetHeading)(ped, heading);
-        return true;
-    } VC_EXCEPT {
-        return false;
-    }
-}
-
 void OnFrameAfterOriginal() {
     ++g_frame;
 
@@ -61,42 +46,8 @@ void OnFrameAfterOriginal() {
         const CVector p = findCoors();
         position = vc::Vector3{p.x, p.y, p.z};
     }
-
-    // «Мир готов»: пед существует и позиция вменяема 180 кадров подряд (~3 c).
-    // До этого НИЧЕГО в мире не трогаем: телепорты и спавн кукол во время
-    // загрузки вешают/роняют игру (сектора CWorld ещё строятся).
-    static int stableFrames = 0;
-    static bool worldReadyLogged = false;
-    const bool sane = position && position->x > -5000.0f && position->x < 5000.0f &&
-                      position->y > -5000.0f && position->y < 5000.0f &&
-                      position->z > -500.0f && position->z < 5000.0f;
-    stableFrames = sane ? stableFrames + 1 : 0;
-    const bool worldReady = stableFrames >= 180;
-    if (worldReady && !worldReadyLogged && g_log) {
-        worldReadyLogged = true;
-        std::fprintf(g_log, "[frame %llu] мир готов (игрок в игре), сетевые действия разрешены\n",
-                     static_cast<unsigned long long>(g_frame));
-        std::fflush(g_log);
-    }
-    if (!sane) worldReadyLogged = false;
-
-    // Телепорт от сервера (спавн, /tp, /kill) — только в готовом мире.
-    if (worldReady && ped) {
-        if (auto tp = vc::network::NetClient::Instance().TakePendingTeleport()) {
-            const bool ok = SafeTeleportLocalPed(ped, tp->position.x, tp->position.y,
-                                                 tp->position.z, tp->heading);
-            if (g_log) {
-                std::fprintf(g_log, "[frame %llu] телепорт сервера (%.1f, %.1f, %.1f) ok=%d\n",
-                             static_cast<unsigned long long>(g_frame), tp->position.x,
-                             tp->position.y, tp->position.z, ok ? 1 : 0);
-                std::fflush(g_log);
-            }
-            const CVector p = findCoors();
-            position = vc::Vector3{p.x, p.y, p.z};
-        }
-    }
     vc::network::NetClient::Instance().SetPlayerPosition(position);
-    vc::pools::PlayerPool::Instance().Tick(worldReady); // куклы удалённых игроков
+    vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
 
     // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).
     // Делается после оригинального CGame::Process: возвращаем педа в точку открытия чата.

@@ -82,28 +82,18 @@ align до байта, тело пакета         игровые пакеты
 Клиент: параметры подключения из `vc-client.ini` рядом с DLL (`[Server] IP/Port/Nick`,
 лаунчер создаёт дефолт 127.0.0.1:7777/Player). Для тестов без игры — `tools/bot-client` (`vc-bot`).
 
-## Видимые игроки (Этап 3, протокол v3)
+## Видимые игроки (Этап 3, протокол v2)
 
 | Пакет | Направление | Reliability/канал | Формат после ID |
 |---|---|---|---|
-| `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u16 skin, u8 nickLen, nick, f32 x,y,z, f32 heading` — создать куклу |
+| `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u8 nickLen, nick, f32 x,y,z` — создать куклу |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |
-| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z, f32 heading` — ретрансляция чужого OnFootSync |
-| `TeleportPlayer` (108) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill` |
+| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z` — ретрансляция чужого OnFootSync |
 
-Стриминг по радиусу 250 м: сервер раз в 500 мс сверяет видимость и шлёт
-StreamIn/Out; SyncUpdate получают только зрители. Heading сервер вычисляет из
-направления движения (`atan2(-dx, dy)`). Клиент спавнит `CCivilianPed` (модель
-= skin) через пул игры, отключает ИИ хуком `CPed::ProcessControl`, двигает
-Teleport-ом со сглаживанием, поворачивает `SetHeading`, анимирует `SetMoveState`;
-ники рисует через `CSprite::CalcScreenCoors`.
-
-## Чат-команды сервера
-
-Текст чата, начинающийся с `/`, не ретранслируется, а выполняется сервером:
-`/help`, `/bot` (серверный NPC перед игроком, ходит по кругу), `/unbot`,
-`/skin <0-130>`, `/tp <x> <y> <z>`, `/kill` (респавн), `/pos`, `/players`.
-Точка спавна — `spawnpos` в `server.cfg` (по умолчанию особняк Версетти).
+Сервер шлёт StreamIn новичку обо всех онлайн и всем о новичке; стриминга по радиусу
+пока нет (все видят всех). Клиент спавнит `CCivilianPed` (модель 7) через пул игры,
+отключает её ИИ хуком `CPed::ProcessControl` и двигает Teleport-ом каждый кадр
+с экспоненциальным сглаживанием к целевой позиции.
 
 ## Дальше по протоколу
 

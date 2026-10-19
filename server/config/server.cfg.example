@@ -3,8 +3,6 @@ hostname        My Vice City Server
 port            7777
 maxplayers      100
 gamemode        freeroam
-# Точка спавна: x y z [heading]. Значение "none" — не телепортировать при входе.
-spawnpos        -378.5 -589.1 25.6 0.0
 password
 rcon_password   change_me
 announce        1

@@ -23,11 +23,9 @@
 
 #include <shared/version.h>
 
-#include "../core/seh_guard.h"
 #include "../game/hooks/hook_cgame_process.h"
 #include "../game/revc.h"
 #include "../network/net_client.h"
-#include "../pools/player_pool.h"
 #include "overlay.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -72,51 +70,6 @@ LRESULT CALLBACK HookWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 1;
     }
     return CallWindowProc(g_origWndProc, hwnd, msg, wParam, lParam);
-}
-
-// POD SEH-обёртка: проекция мир->экран не должна ронять игру.
-bool SafeCalcScreenCoors(float x, float y, float z, float* outX, float* outY) {
-    using CalcScreenCoorsFn =
-        bool (*)(const game::CVector&, game::CVector*, float*, float*, bool);
-    VC_TRY {
-        auto calc = game::Resolve<CalcScreenCoorsFn>(game::revc::kCSpriteCalcScreenCoors);
-        if (!calc) return false;
-        const game::CVector in{x, y, z};
-        game::CVector out{};
-        float w = 0.0f, h = 0.0f;
-        if (!calc(in, &out, &w, &h, true)) return false;
-        *outX = out.x;
-        *outY = out.y;
-        return true;
-    } VC_EXCEPT {
-        return false;
-    }
-}
-
-// Никнеймы над куклами: мировая точка над головой -> экран через CSprite::CalcScreenCoors.
-void DrawNametags() {
-    auto findPed = game::Resolve<game::FindPlayerPedFn>(game::revc::kFindPlayerPed);
-    auto findCoors = game::Resolve<FindPlayerCoorsFn>(game::revc::kFindPlayerCoors);
-    if (!findPed || !findPed()) return;
-    const game::CVector local = findCoors();
-
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    for (const auto& info : vc::pools::PlayerPool::Instance().RenderInfos()) {
-        const float dx = info.position.x - local.x;
-        const float dy = info.position.y - local.y;
-        const float dz = info.position.z - local.z;
-        if (dx * dx + dy * dy + dz * dz > 120.0f * 120.0f) continue; // дальше не читаемо
-
-        float sx = 0.0f, sy = 0.0f;
-        if (!SafeCalcScreenCoors(info.position.x, info.position.y, info.position.z + 2.1f,
-                                 &sx, &sy))
-            continue; // за камерой/экраном или исключение игры
-
-        const ImVec2 size = ImGui::CalcTextSize(info.nick.c_str());
-        const ImVec2 at(sx - size.x * 0.5f, sy - size.y);
-        draw->AddText(ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 220), info.nick.c_str());
-        draw->AddText(at, IM_COL32(255, 255, 255, 255), info.nick.c_str());
-    }
 }
 
 void DrawChatWindow() {

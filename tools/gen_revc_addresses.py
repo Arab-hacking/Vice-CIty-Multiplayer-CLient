@@ -55,9 +55,7 @@ CURATED = [
     ("kCKeyboardStateClear", "?Clear@CKeyboardState@@QEAAXXZ", "void CKeyboardState::Clear()"),
     ("kCPoolPedNew", "?New@?$CPool@VCPed@@VCPlayerPed@@@@QEAAPEAVCPed@@XZ", "CPed* CPool<CPed>::New() — аллокация слота педа"),
     ("kCPedProcessControl", "?ProcessControl@CPed@@UEAAXXZ", "void CPed::ProcessControl() — хук отключает ИИ сетевых кукол"),
-    ("kCPlaceableSetHeading", "?SetHeading@CPlaceable@@QEAAXM@Z", "void CPlaceable::SetHeading(float) — поворот куклы"),
-    ("kCSpriteCalcScreenCoors", "?CalcScreenCoors@CSprite@@SA_NAEBUV3d@rw@@PEAU23@PEAM2_N@Z", "bool CSprite::CalcScreenCoors(in, out, w, h, check) — мир->экран для никнеймов"),
-    ("kCPedSetMoveState", "?SetMoveState@CPed@@QEAAXW4eMoveState@@@Z", "void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы"),
+    ("kCPlaceableSetHeading", "?SetHeading@CPlaceable@@QEAAXM@Z", "void CPlaceable::SetHeading(float) — на будущее"),
 ]
 
 
