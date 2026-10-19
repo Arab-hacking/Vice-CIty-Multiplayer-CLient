@@ -89,10 +89,11 @@ align до байта, тело пакета         игровые пакеты
 | `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u16 skin, u8 nickLen, nick, f32 x,y,z` — создать куклу (протокол v4) |
 | `CreateVehicle` (110) | С→К | ReliableOrdered/0 | `u16 vehicleId, u16 model, f32 x,y,z, f32 heading` — серверная машина вошла в радиус стриминга (протокол v5) |
 | `DestroyVehicle` (111) | С→К | ReliableOrdered/0 | `u16 vehicleId` — убрать машину |
-| `EnterVehicle` (32) | К→С | ReliableOrdered/0 | `u16 vehicleId, u8 seat` (0 — водитель); сервер помечает водителя и прячет его пешую куклу (протокол v6) |
+| `EnterVehicle` (32) | К→С | ReliableOrdered/0 | `u16 vehicleId, u8 seat` (0 — водитель, 1–3 — пассажиры); сервер бронирует место и рассылает `VehicleOccupant` (v6–v7) |
 | `ExitVehicle` (33) | К→С | ReliableOrdered/0 | без тела |
 | `InVehicleSync` (11) | К→С | UnreliableSequenced/2 | `u16 vehicleId, f32 x,y,z, f32 qx,qy,qz,qw` — поза машины от водителя, 10 Гц |
 | `VehicleSyncUpdate` (112) | С→К | UnreliableSequenced/2 | тот же формат — ретрансляция зрителям машины |
+| `VehicleOccupant` (113) | С→К | ReliableOrdered/0 | `u16 vehicleId, u16 playerId, u8 seat` (0 — водитель, 1–3 — пассажиры, 255 — покинул машину); клиенты сажают куклу игрока в машину (протокол v7) |
 | `Teleport` (132) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill`/респавн после смерти; клиент применяет, когда мир готов и пед жив |
 | `Death` (31) | К→С | ReliableOrdered/0 | без тела — клиент заметил HP<=0; сервер прячет куклу и шлёт Teleport на спавн, по первому синку с HP>0 игрок снова в стриме |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |

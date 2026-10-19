@@ -19,6 +19,9 @@ public:
     // Серверный id по указателю на игровую машину (0 — не серверная).
     // Нужен хуку кадра, чтобы понять, что локальный игрок за рулём нашей машины.
     [[nodiscard]] std::uint16_t ServerIdOf(const void* vehicle) const;
+    // Игровая машина по серверному id (nullptr — ещё не заспавнена локально).
+    // PlayerPool сажает в неё кукол сидящих игроков.
+    [[nodiscard]] void* GameVehicleOf(std::uint16_t serverId) const;
 
 private:
     VehiclePool() = default;

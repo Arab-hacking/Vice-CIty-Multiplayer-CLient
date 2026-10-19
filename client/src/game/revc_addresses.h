@@ -115,6 +115,12 @@ inline constexpr std::uintptr_t kCEntityDistToBase = 0x0014F7E0u;
 // CStreamingInfo CStreaming::ms_aInfoForModel[] — m_loadState по +0x10, шаг 0x20 (HasModelLoaded)
 inline constexpr std::uintptr_t kCStreamingInfoArray = 0x00624FA0u;
 
+// void CPed::SetObjective(eObjective, void*) — перед WarpPedIntoCar (ENTER_CAR_AS_DRIVER=18/PASSENGER=17)
+inline constexpr std::uintptr_t kCPedSetObjective = 0x00200AF0u;
+
+// void CPed::WarpPedIntoCar(CVehicle*) — мгновенная посадка педа в машину (как скриптовый WARP_CHAR_INTO_CAR)
+inline constexpr std::uintptr_t kCPedWarpPedIntoCar = 0x001ED420u;
+
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 

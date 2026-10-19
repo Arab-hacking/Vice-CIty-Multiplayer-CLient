@@ -49,6 +49,8 @@ public:
         bool hasPosition = false;
         std::uint8_t health = 100;
         std::uint32_t syncCount = 0; // диагностика: сколько SyncUpdate пришло
+        std::uint16_t inVehicleId = 0; // серверная машина, где сидит игрок (0 — пешком)
+        std::uint8_t seat = 0;         // 0 — водитель, 1..3 — пассажир
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
 
@@ -72,7 +74,7 @@ public:
     };
     void SetLocalVehicleState(const std::optional<LocalVehicleState>& state);
     // Края посадки/выхода (игровой поток заметил смену FindPlayerVehicle).
-    void NotifyEnterVehicle(std::uint16_t vehicleId);
+    void NotifyEnterVehicle(std::uint16_t vehicleId, std::uint8_t seat);
     void NotifyExitVehicle();
 
     // Телепорт локального игрока от сервера (спавн, /tp, /kill, смерть).
@@ -117,8 +119,11 @@ private:
     std::uint8_t m_latestHealth = 100;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
     std::map<std::uint16_t, RemoteVehicle> m_remoteVehicles;
+    // playerId -> (vehicleId, seat) из VehicleOccupant (может прийти раньше
+    // StreamIn игрока, поэтому отдельная карта).
+    std::map<std::uint16_t, std::pair<std::uint16_t, std::uint8_t>> m_occupancy;
     std::optional<LocalVehicleState> m_localVehicle;
-    std::atomic<int> m_vehicleEvent{-2}; // -2 нет, -1 выход, >=0 вход (id машины)
+    std::atomic<int> m_vehicleEvent{-2}; // -2 нет, -1 выход, >=0: id | (seat << 16)
     std::optional<LocalTeleport> m_pendingTeleport;
     std::atomic<bool> m_deathPending{false};
 };

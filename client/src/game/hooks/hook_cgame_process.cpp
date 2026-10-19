@@ -73,6 +73,22 @@ bool SafeReadVehiclePose(void* vehicle, float* pos, float* rows, unsigned int* f
     }
 }
 
+// Место педа в машине: 0 — водитель (не в pPassengers, статус STATUS_PLAYER),
+// 1..3 — пассажир pPassengers[seat-1], -1 — ещё не уселся (анимация входа).
+int SafeFindSeat(void* vehicle, void* ped, unsigned int flags) {
+    VC_TRY {
+        const auto* base = static_cast<const char*>(vehicle);
+        for (int i = 0; i < 3; ++i) {
+            void* occupant = *reinterpret_cast<void* const*>(
+                base + kVehiclePassengersOffset + i * sizeof(void*));
+            if (occupant == ped) return i + 1;
+        }
+        return ((flags >> 3) & 0x1F) == 0 ? 0 : -1; // STATUS_PLAYER => за рулём
+    } VC_EXCEPT {
+        return -1;
+    }
+}
+
 // Телепорт локального педа: Teleport + SetHeading (this=ped+8!) + перенос
 // встроенной матрицы в матрицу Rw-фрейма + UpdateRwFrame. POD SEH-обёртка.
 bool SafeTeleportLocalPed(void* ped, float x, float y, float z, float heading) {
@@ -153,47 +169,50 @@ void OnFrameAfterOriginal() {
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
 
-    // Локальный игрок за рулём СЕРВЕРНОЙ машины? Шлём позу + края посадки.
+    // Локальный игрок в СЕРВЕРНОЙ машине? Края посадки + поза (только водитель).
     {
-        static std::uint16_t drivingId = 0;
+        static std::uint16_t seatedId = 0;
+        static int seatedSeat = -1;
         void* myVehicle = SafeFindPlayerVehicle();
         std::uint16_t serverId = 0;
-        bool isDriver = false;
+        int seat = -1;
         float vpos[3] = {};
         float vrows[9] = {};
-        if (myVehicle) {
+        if (myVehicle && ped) {
             serverId = vc::pools::VehiclePool::Instance().ServerIdOf(myVehicle);
             unsigned int vflags = 0;
             if (serverId != 0 && SafeReadVehiclePose(myVehicle, vpos, vrows, &vflags))
-                isDriver = ((vflags >> 3) & 0x1F) == 0; // STATUS_PLAYER
+                seat = SafeFindSeat(myVehicle, ped, vflags);
         }
         auto& net = vc::network::NetClient::Instance();
-        if (isDriver) {
-            if (serverId != drivingId) {
-                if (drivingId != 0) net.NotifyExitVehicle();
-                net.NotifyEnterVehicle(serverId);
-                drivingId = serverId;
-                if (g_log) {
-                    std::fprintf(g_log, "[frame %llu] за рулём серверной машины id %u\n",
-                                 static_cast<unsigned long long>(g_frame), serverId);
-                    std::fflush(g_log);
-                }
+        const bool seated = serverId != 0 && seat >= 0;
+        if (seated && (serverId != seatedId || seat != seatedSeat)) {
+            if (seatedId != 0) net.NotifyExitVehicle();
+            net.NotifyEnterVehicle(serverId, static_cast<std::uint8_t>(seat));
+            seatedId = serverId;
+            seatedSeat = seat;
+            if (g_log) {
+                std::fprintf(g_log, "[frame %llu] в серверной машине id %u, место %d\n",
+                             static_cast<unsigned long long>(g_frame), serverId, seat);
+                std::fflush(g_log);
             }
+        } else if (!seated && seatedId != 0) {
+            net.NotifyExitVehicle();
+            seatedId = 0;
+            seatedSeat = -1;
+            if (g_log) {
+                std::fprintf(g_log, "[frame %llu] вышел из серверной машины\n",
+                             static_cast<unsigned long long>(g_frame));
+                std::fflush(g_log);
+            }
+        }
+        if (seated && seat == 0) {
             const vc::Quaternion q = vc::QuatFromBasis(
                 {vrows[0], vrows[1], vrows[2]}, {vrows[3], vrows[4], vrows[5]},
                 {vrows[6], vrows[7], vrows[8]});
             net.SetLocalVehicleState(vc::network::NetClient::LocalVehicleState{
                 serverId, vc::Vector3{vpos[0], vpos[1], vpos[2]}, q});
         } else {
-            if (drivingId != 0) {
-                net.NotifyExitVehicle();
-                drivingId = 0;
-                if (g_log) {
-                    std::fprintf(g_log, "[frame %llu] вышел из серверной машины\n",
-                                 static_cast<unsigned long long>(g_frame));
-                    std::fflush(g_log);
-                }
-            }
             net.SetLocalVehicleState(std::nullopt);
         }
     }

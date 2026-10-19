@@ -134,4 +134,16 @@ struct EnterVehicleData {
 [[nodiscard]] std::optional<EnterVehicleData> ParseEnterVehicle(
     const std::vector<std::uint8_t>& payload);
 
+// VehicleOccupant: [113][u16 vehicleId][u16 playerId][u8 seat] — кто сидит в
+// машине (seat 0 — водитель, 1..3 — пассажиры, 255 — игрок вышел).
+struct VehicleOccupantData {
+    std::uint16_t vehicleId = 0;
+    std::uint16_t playerId = 0;
+    std::uint8_t seat = 0;
+};
+inline constexpr std::uint8_t kSeatVacated = 255;
+[[nodiscard]] std::vector<std::uint8_t> BuildVehicleOccupant(const VehicleOccupantData& data);
+[[nodiscard]] std::optional<VehicleOccupantData> ParseVehicleOccupant(
+    const std::vector<std::uint8_t>& payload);
+
 } // namespace vc::protocol

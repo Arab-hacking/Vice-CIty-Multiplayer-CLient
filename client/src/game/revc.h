@@ -56,5 +56,9 @@ inline constexpr std::uint8_t kStreamStateLoaded = 1;
 // локальная физика утаскивает её от сетевой позы накопленной скоростью.
 inline constexpr std::uintptr_t kPhysicalMoveSpeedOffset = 0x80;
 inline constexpr std::uintptr_t kPhysicalTurnSpeedOffset = 0x8C;
+// CVehicle::pPassengers[8] на veh+0x220 (IsPassenger); место пассажира N
+// (1..3 в нашем протоколе) = pPassengers[N-1]. Водитель — pDriver (не нужен:
+// водитель определяется как «в машине, но не в pPassengers»).
+inline constexpr std::uintptr_t kVehiclePassengersOffset = 0x220;
 
 } // namespace vc::game

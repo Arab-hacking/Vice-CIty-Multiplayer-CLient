@@ -363,4 +363,26 @@ std::optional<EnterVehicleData> ParseEnterVehicle(
     return data;
 }
 
+std::vector<std::uint8_t> BuildVehicleOccupant(const VehicleOccupantData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::VehicleOccupant));
+    w.U16(data.vehicleId);
+    w.U16(data.playerId);
+    w.U8(data.seat);
+    return w.out;
+}
+
+std::optional<VehicleOccupantData> ParseVehicleOccupant(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::VehicleOccupant)))
+        return std::nullopt;
+    VehicleOccupantData data;
+    data.vehicleId = r.U16();
+    data.playerId = r.U16();
+    data.seat = r.U8();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
 } // namespace vc::protocol

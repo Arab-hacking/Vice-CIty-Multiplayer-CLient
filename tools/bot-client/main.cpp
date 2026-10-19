@@ -32,8 +32,12 @@ int main(int argc, char** argv) {
     std::string say = "Привет! Я тестовый бот vc-bot.";
     int seconds = 5;
     bool drive = false;
-    for (int i = 1; i < argc; ++i)
+    int driveSeat = 0;
+    for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--drive") drive = true;
+        if (std::string(argv[i]) == "--seat" && i + 1 < argc)
+            driveSeat = std::atoi(argv[i + 1]);
+    }
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--ip") server.ip = argv[++i];
@@ -92,6 +96,10 @@ int main(int argc, char** argv) {
                                 vi->vehicleId, vi->model, vi->position.x, vi->position.y,
                                 vi->position.z);
                     std::fflush(stdout);
+                } else if (auto occ = vc::protocol::ParseVehicleOccupant(payload)) {
+                    std::printf("[bot] occupant: машина %u, игрок %u, место %u\n",
+                                occ->vehicleId, occ->playerId, occ->seat);
+                    std::fflush(stdout);
                 } else if (auto vu = vc::protocol::ParseVehicleSyncUpdate(payload)) {
                     static int vehPrinted = 0;
                     if (vehPrinted < 6) {
@@ -142,11 +150,13 @@ int main(int argc, char** argv) {
             if (drive && chatSent && driveVehicleId != 0) {
                 if (!enteredVehicle) {
                     enteredVehicle = true;
-                    send(vc::protocol::BuildEnterVehicle({driveVehicleId, 0}),
+                    send(vc::protocol::BuildEnterVehicle(
+                             {driveVehicleId, static_cast<std::uint8_t>(driveSeat)}),
                          vc::net::Reliability::ReliableOrdered, 0);
-                    std::printf("[bot] сел за руль машины id %u\n", driveVehicleId);
+                    std::printf("[bot] сел в машину id %u (место %d)\n", driveVehicleId,
+                                driveSeat);
                     std::fflush(stdout);
-                } else {
+                } else if (driveSeat == 0) {
                     drivePhase += 0.05f;
                     const float cx = -390.0f + std::cos(drivePhase) * 12.0f;
                     const float cy = -540.0f + std::sin(drivePhase) * 12.0f;

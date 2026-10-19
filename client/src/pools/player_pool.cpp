@@ -21,6 +21,7 @@
 #include "../game/revc.h"
 #include "../network/net_client.h"
 #include "player_pool.h"
+#include "vehicle_pool.h"
 
 namespace vc::pools {
 namespace {
@@ -101,6 +102,7 @@ struct Puppet {
     vc::Vector3 current{};
     float heading = 0.0f;
     std::uint8_t health = 100;
+    std::uint16_t seatedVehicleId = 0; // серверная машина, куда кукла посажена
 };
 
 std::map<std::uint16_t, Puppet> g_puppets;
@@ -184,6 +186,28 @@ void DestroyPuppet(void* ped) {
     reinterpret_cast<DeletingDtorFn>(vtable[0])(ped, 1); // деструктор + возврат слота в пул
 }
 
+// Посадка куклы в машину каноничным путём скриптового WARP_CHAR_INTO_CAR:
+// SetObjective(ENTER_CAR_AS_DRIVER=18 / AS_PASSENGER=17) + WarpPedIntoCar.
+// Дальше педа в салоне позиционирует сама игра (CWorld::Process ->
+// SetPedPositionInCar) — наш хук ProcessControl этому не мешает.
+// Высадка — уничтожением и пересозданием куклы: деструктор CPed сам
+// аккуратно снимает педа из машины (pDriver=nil / RemovePassenger).
+using SetObjectiveFn = void (*)(void*, int, void*);
+using WarpPedIntoCarFn = void (*)(void*, void*);
+constexpr int kObjectiveEnterCarPassenger = 17;
+constexpr int kObjectiveEnterCarDriver = 18;
+
+bool SeatPuppetRaw(void* ped, void* vehicle, bool driver) {
+    VC_TRY {
+        game::Resolve<SetObjectiveFn>(game::revc::kCPedSetObjective)(
+            ped, driver ? kObjectiveEnterCarDriver : kObjectiveEnterCarPassenger, vehicle);
+        game::Resolve<WarpPedIntoCarFn>(game::revc::kCPedWarpPedIntoCar)(ped, vehicle);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 } // namespace
 
 PlayerPool& PlayerPool::Instance() {
@@ -252,6 +276,7 @@ void PlayerPool::Tick() {
             DestroyPuppet(puppet.ped);
             g_puppetPeds.erase(puppet.ped);
             puppet.ped = nullptr;
+            puppet.seatedVehicleId = 0;
         }
         if (!puppet.ped) {
             // Позиция (0,0,0) — игрок только подключился, sync ещё не приходил.
@@ -267,6 +292,37 @@ void PlayerPool::Tick() {
             continue;
         }
         puppet.health = remote.health;
+
+        // Посадка/высадка: сервер сообщает через VehicleOccupant, в какой
+        // машине сидит игрок. Посаженную куклу ведёт сама игра — мы её не
+        // телепортируем. Высадка = пересоздание педа (деструктор чистит салон).
+        if (remote.inVehicleId != puppet.seatedVehicleId) {
+            if (puppet.seatedVehicleId != 0) {
+                DestroyPuppet(puppet.ped);
+                g_puppetPeds.erase(puppet.ped);
+                puppet.ped = nullptr;
+                puppet.seatedVehicleId = 0;
+                Log(("pool: кукла " + remote.nick + " высажена (пересоздана)\n").c_str());
+                continue; // пересоздастся на следующем кадре уже пешком
+            }
+            void* vehicle = VehiclePool::Instance().GameVehicleOf(remote.inVehicleId);
+            if (vehicle && SeatPuppetRaw(puppet.ped, vehicle, remote.seat == 0)) {
+                puppet.seatedVehicleId = remote.inVehicleId;
+                Log(("pool: кукла " + remote.nick + " посажена в машину\n").c_str());
+            }
+        }
+        if (puppet.seatedVehicleId != 0) {
+            // Машину могли удалить из-под куклы (стрим-аут): пересаживаем на ноги.
+            if (!VehiclePool::Instance().GameVehicleOf(puppet.seatedVehicleId)) {
+                DestroyPuppet(puppet.ped);
+                g_puppetPeds.erase(puppet.ped);
+                puppet.ped = nullptr;
+                puppet.seatedVehicleId = 0;
+            }
+            puppet.current = remote.targetPosition; // для никнейма над машиной
+            continue;
+        }
+
         // Плавное движение к целевой точке; на больших дистанциях — телепорт.
         const vc::Vector3& target = remote.targetPosition;
         const float dx = target.x - puppet.current.x;

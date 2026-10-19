@@ -138,6 +138,7 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
     } else if (auto streamOut = vc::protocol::ParsePlayerStreamOut(payload)) {
         std::lock_guard lock(m_mutex);
         m_remotePlayers.erase(*streamOut);
+        m_occupancy.erase(*streamOut);
         Log("net: stream-out игрока id " + std::to_string(*streamOut) + "\n");
     } else if (auto update = vc::protocol::ParsePlayerSyncUpdate(payload)) {
         std::lock_guard lock(m_mutex);
@@ -162,6 +163,14 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles.erase(*vehicleOut);
         Log("net: stream-out машины id " + std::to_string(*vehicleOut) + "\n");
+    } else if (auto occ = vc::protocol::ParseVehicleOccupant(payload)) {
+        std::lock_guard lock(m_mutex);
+        if (occ->seat == vc::protocol::kSeatVacated)
+            m_occupancy.erase(occ->playerId);
+        else
+            m_occupancy[occ->playerId] = {occ->vehicleId, occ->seat};
+        Log("net: occupant veh " + std::to_string(occ->vehicleId) + " player " +
+            std::to_string(occ->playerId) + " seat " + std::to_string(occ->seat) + "\n");
     } else if (auto pose = vc::protocol::ParseVehicleSyncUpdate(payload)) {
         std::lock_guard lock(m_mutex);
         auto it = m_remoteVehicles.find(pose->vehicleId);
@@ -188,8 +197,8 @@ void NetClient::SetLocalVehicleState(const std::optional<LocalVehicleState>& sta
     m_localVehicle = state;
 }
 
-void NetClient::NotifyEnterVehicle(std::uint16_t vehicleId) {
-    m_vehicleEvent.store(static_cast<int>(vehicleId));
+void NetClient::NotifyEnterVehicle(std::uint16_t vehicleId, std::uint8_t seat) {
+    m_vehicleEvent.store(static_cast<int>(vehicleId) | (static_cast<int>(seat) << 16));
 }
 
 void NetClient::NotifyExitVehicle() { m_vehicleEvent.store(-1); }
@@ -198,7 +207,14 @@ std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
     std::lock_guard lock(m_mutex);
     std::vector<RemotePlayer> out;
     out.reserve(m_remotePlayers.size());
-    for (const auto& [id, remote] : m_remotePlayers) out.push_back(remote);
+    for (const auto& [id, remote] : m_remotePlayers) {
+        RemotePlayer copy = remote;
+        if (auto it = m_occupancy.find(id); it != m_occupancy.end()) {
+            copy.inVehicleId = it->second.first;
+            copy.seat = it->second.second;
+        }
+        out.push_back(copy);
+    }
     return out;
 }
 
@@ -258,11 +274,12 @@ void NetClient::ThreadMain() {
         if (m_state.load() == State::Connected) {
             const int event = m_vehicleEvent.exchange(-2);
             if (event >= 0) {
-                SendPayloadLockedPeer(
-                    vc::protocol::BuildEnterVehicle(
-                        {static_cast<std::uint16_t>(event), 0}),
-                    vc::net::Reliability::ReliableOrdered, 0, now);
-                Log("net: сели за руль машины id " + std::to_string(event) + "\n");
+                const auto vehId = static_cast<std::uint16_t>(event & 0xFFFF);
+                const auto seat = static_cast<std::uint8_t>((event >> 16) & 0xFF);
+                SendPayloadLockedPeer(vc::protocol::BuildEnterVehicle({vehId, seat}),
+                                      vc::net::Reliability::ReliableOrdered, 0, now);
+                Log("net: сели в машину id " + std::to_string(vehId) + " место " +
+                    std::to_string(seat) + "\n");
             } else if (event == -1) {
                 SendPayloadLockedPeer(
                     {static_cast<std::uint8_t>(vc::protocol::ClientPacket::ExitVehicle)},

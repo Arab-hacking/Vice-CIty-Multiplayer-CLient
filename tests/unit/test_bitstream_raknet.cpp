@@ -235,6 +235,9 @@ void TestCodec() {
     const auto enter = vc::protocol::ParseEnterVehicle(
         vc::protocol::BuildEnterVehicle({42, 0}));
     CHECK(enter && enter->vehicleId == 42 && enter->seat == 0);
+    const auto occ = vc::protocol::ParseVehicleOccupant(
+        vc::protocol::BuildVehicleOccupant({7, 42, 2}));
+    CHECK(occ && occ->vehicleId == 7 && occ->playerId == 42 && occ->seat == 2);
 
     // Кватернион: базис -> quat -> базис (round-trip) для поворота на 30° по Z.
     {

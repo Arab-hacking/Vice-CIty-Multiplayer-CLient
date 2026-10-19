@@ -35,6 +35,7 @@ enum class ServerRpc : std::uint8_t {
     CreateVehicle      = 110,
     DestroyVehicle     = 111,
     VehicleSyncUpdate  = 112,
+    VehicleOccupant    = 113,
     CreateObject       = 120,
     DestroyObject      = 121,
     ServerMessage      = 130,

@@ -57,6 +57,8 @@ CURATED = [
     ("kCPoolVehicleNew", "?New@?$CPool@VCVehicle@@VCAutomobile@@@@QEAAPEAVCVehicle@@XZ", "CVehicle* CPool<CVehicle>::New() — аллокация слота транспорта"),
     ("kCEntityDistToBase", "?GetDistanceFromCentreOfMassToBaseOfModel@CEntity@@QEAAMXZ", "float CEntity::GetDistanceFromCentreOfMassToBaseOfModel() — высота покоя машины при спавне"),
     ("kCStreamingInfoArray", "?ms_aInfoForModel@CStreaming@@2PAVCStreamingInfo@@A", "CStreamingInfo CStreaming::ms_aInfoForModel[] — m_loadState по +0x10, шаг 0x20 (HasModelLoaded)"),
+    ("kCPedSetObjective", "?SetObjective@CPed@@QEAAXW4eObjective@@PEAX@Z", "void CPed::SetObjective(eObjective, void*) — перед WarpPedIntoCar (ENTER_CAR_AS_DRIVER=18/PASSENGER=17)"),
+    ("kCPedWarpPedIntoCar", "?WarpPedIntoCar@CPed@@QEAAXPEAVCVehicle@@@Z", "void CPed::WarpPedIntoCar(CVehicle*) — мгновенная посадка педа в машину (как скриптовый WARP_CHAR_INTO_CAR)"),
     ("kCPedProcessControl", "?ProcessControl@CPed@@UEAAXXZ", "void CPed::ProcessControl() — хук отключает ИИ сетевых кукол"),
     ("kCPlaceableSetHeading", "?SetHeading@CPlaceable@@QEAAXM@Z", "void CPlaceable::SetHeading(float) — на будущее"),
     ("kCSpriteCalcScreenCoors", "?CalcScreenCoors@CSprite@@SA_NAEBUV3d@rw@@PEAU23@PEAM2_N@Z", "bool CSprite::CalcScreenCoors(in, out, w, h, check) — мир->экран для никнеймов"),

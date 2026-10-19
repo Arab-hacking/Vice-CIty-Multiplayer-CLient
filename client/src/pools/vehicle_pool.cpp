@@ -302,6 +302,11 @@ std::uint16_t VehiclePool::ServerIdOf(const void* vehicle) const {
     return 0;
 }
 
+void* VehiclePool::GameVehicleOf(std::uint16_t serverId) const {
+    const auto it = g_vehicles.find(serverId);
+    return it != g_vehicles.end() ? it->second.vehicle : nullptr;
+}
+
 void VehiclePool::Tick() {
     ++g_tickCount;
     const auto remotes = vc::network::NetClient::Instance().RemoteVehicles();

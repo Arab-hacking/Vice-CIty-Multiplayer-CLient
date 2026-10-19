@@ -114,7 +114,8 @@ struct Session {
     std::uint8_t health = 100;
     std::uint16_t skin = 7;
     bool dead = false; // между Death-пакетом и первым синком с HP>0 (респавн)
-    std::uint16_t inVehicleId = 0; // серверная машина, которой управляет игрок (0 — пешком)
+    std::uint16_t inVehicleId = 0; // серверная машина игрока (0 — пешком)
+    std::uint8_t inVehicleSeat = 0; // 0 — водитель, 1..3 — пассажир
     std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
     std::set<std::uint16_t> streamedVehicles; // какие машины у него созданы
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
@@ -141,7 +142,9 @@ struct ServerVehicle {
     std::uint16_t ownerId = 0;
     vc::Vector3 position{};
     float heading = 0.0f;
-    std::uint16_t driverId = 0; // игрок за рулём (0 — свободна)
+    // [0] — водитель, [1..3] — пассажиры; playerId или -1 (пусто). НЕ 0:
+    // playerId=0 — валидный первый игрок.
+    std::int32_t seats[4] = {-1, -1, -1, -1};
     float quat[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // последняя поза от водителя
 };
 std::vector<ServerVehicle> g_vehicles;
@@ -181,9 +184,9 @@ struct VisibleEntity {
 std::vector<VisibleEntity> BuildEntities(const std::map<std::string, Session>& sessions) {
     std::vector<VisibleEntity> out;
     for (const auto& [key, s] : sessions)
-        // Водителя не показываем пешей куклой: видна сама машина (пед в салоне —
-        // следующий шаг этапа 4 вместе с пассажирами).
-        if (s.joined && !s.dead && s.inVehicleId == 0)
+        // Сидящих в машине тоже показываем: клиент посадит куклу в салон по
+        // VehicleOccupant (пешая позиция синка у них равна позиции машины).
+        if (s.joined && !s.dead)
             out.push_back({s.playerId, s.skin, s.nick, s.position});
     for (const auto& b : g_bots) out.push_back({b.id, 7, b.nick, b.position});
     return out;
@@ -248,6 +251,14 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
                      vc::protocol::BuildVehicleStreamIn(
                          {it->id, it->model, it->position, it->heading}),
                      vc::net::Reliability::ReliableOrdered, 0);
+            // Сразу сообщить, кто уже сидит внутри.
+            if (it != g_vehicles.end())
+                for (std::uint8_t seat = 0; seat < 4; ++seat)
+                    if (it->seats[seat] >= 0)
+                        Send(socket, session,
+                             vc::protocol::BuildVehicleOccupant(
+                                 {it->id, static_cast<std::uint16_t>(it->seats[seat]), seat}),
+                             vc::net::Reliability::ReliableOrdered, 0);
         }
         for (std::uint16_t id : session.streamedVehicles)
             if (!desiredVehicles.contains(id))
@@ -279,12 +290,32 @@ void RemoveBotOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& ses
     }
 }
 
-// Снять игрока с руля (вышел из машины / погиб / отключился).
-void ClearDriver(Session& session) {
+// Сообщить зрителям машины об изменении occupancy (seat=255 — вышел).
+void BroadcastOccupant(vc::net::UdpSocket& socket,
+                       std::map<std::string, Session>& sessions, std::uint16_t vehicleId,
+                       std::uint16_t playerId, std::uint8_t seat) {
+    const auto packet =
+        vc::protocol::BuildVehicleOccupant({vehicleId, playerId, seat});
+    for (auto& [key, other] : sessions) {
+        if (!other.joined || other.playerId == playerId) continue;
+        if (!other.streamedVehicles.contains(vehicleId)) continue;
+        Send(socket, other, packet, vc::net::Reliability::ReliableOrdered, 0);
+    }
+}
+
+// Снять игрока с места в машине (вышел / погиб / отключился).
+void ClearSeat(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
+               Session& session) {
     if (session.inVehicleId == 0) return;
+    const std::uint16_t vehicleId = session.inVehicleId;
     for (auto& v : g_vehicles)
-        if (v.id == session.inVehicleId && v.driverId == session.playerId) v.driverId = 0;
+        if (v.id == vehicleId)
+            for (auto& seat : v.seats)
+                if (seat == static_cast<std::int32_t>(session.playerId)) seat = -1;
     session.inVehicleId = 0;
+    session.inVehicleSeat = 0;
+    BroadcastOccupant(socket, sessions, vehicleId, session.playerId,
+                      vc::protocol::kSeatVacated);
 }
 
 // Убрать все машины владельца (выход с сервера, /delcar, повторный /car).
@@ -464,7 +495,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
             RemoveBotOf(socket, sessions, session.playerId);
-            ClearDriver(session);
+            ClearSeat(socket, sessions, session);
             RemoveVehiclesOf(socket, sessions, session.playerId);
             for (auto& [key, other] : sessions) other.streamedIn.erase(session.playerId);
         }
@@ -537,16 +568,20 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (!session.joined) return false;
 
     if (auto enter = vc::protocol::ParseEnterVehicle(payload)) {
-        ClearDriver(session);
-        if (enter->seat == 0) {
+        ClearSeat(socket, sessions, session);
+        if (enter->seat <= 3) {
             for (auto& v : g_vehicles) {
                 if (v.id != enter->vehicleId) continue;
-                if (v.driverId == 0 || v.driverId == session.playerId) {
-                    v.driverId = session.playerId;
+                if (v.seats[enter->seat] < 0 ||
+                    v.seats[enter->seat] == static_cast<std::int32_t>(session.playerId)) {
+                    v.seats[enter->seat] = session.playerId;
                     session.inVehicleId = v.id;
-                    std::printf("[server] Игрок %s сел за руль машины id %u\n",
-                                session.nick.c_str(), v.id);
+                    session.inVehicleSeat = enter->seat;
+                    std::printf("[server] Игрок %s сел в машину id %u (место %u)\n",
+                                session.nick.c_str(), v.id, enter->seat);
                     std::fflush(stdout);
+                    BroadcastOccupant(socket, sessions, v.id, session.playerId,
+                                      enter->seat);
                 }
                 break;
             }
@@ -559,13 +594,14 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                         session.inVehicleId);
             std::fflush(stdout);
         }
-        ClearDriver(session);
+        ClearSeat(socket, sessions, session);
         return false;
     }
     if (auto pose = vc::protocol::ParseInVehicleSync(payload)) {
         if (pose->vehicleId == session.inVehicleId && session.inVehicleId != 0) {
             for (auto& v : g_vehicles) {
-                if (v.id != pose->vehicleId || v.driverId != session.playerId) continue;
+                if (v.id != pose->vehicleId ||
+                    v.seats[0] != static_cast<std::int32_t>(session.playerId)) continue;
                 v.position = pose->position;
                 v.quat[0] = pose->quatX;
                 v.quat[1] = pose->quatY;
@@ -587,7 +623,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::Death)) {
         if (!session.dead) {
             session.dead = true;
-            ClearDriver(session);
+            ClearSeat(socket, sessions, session);
             std::printf("[server] Игрок %s (id %u) погиб\n", session.nick.c_str(),
                         session.playerId);
             std::fflush(stdout);
@@ -769,7 +805,7 @@ int main(int argc, char** argv) {
                     Broadcast(socket, sessions,
                               vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
                     RemoveBotOf(socket, sessions, session.playerId);
-                    ClearDriver(session);
+                    ClearSeat(socket, sessions, session);
                     RemoveVehiclesOf(socket, sessions, session.playerId);
                     const std::uint16_t goneId = session.playerId;
                     for (auto& [otherKey, other] : sessions) other.streamedIn.erase(goneId);

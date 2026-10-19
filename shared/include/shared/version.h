@@ -6,8 +6,8 @@ namespace vc {
 
 // Версия сетевого протокола. Увеличивается при ЛЮБОМ несовместимом
 // изменении формата пакетов (см. docs/NETWORK-PROTOCOL.md).
-inline constexpr std::uint32_t PROTOCOL_VERSION = 6;
+inline constexpr std::uint32_t PROTOCOL_VERSION = 7;
 
-inline constexpr const char* CLIENT_VERSION = "0.6.14-dev";
+inline constexpr const char* CLIENT_VERSION = "0.6.15-dev";
 
 } // namespace vc
