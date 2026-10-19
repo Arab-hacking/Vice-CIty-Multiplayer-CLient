@@ -109,6 +109,9 @@ inline constexpr std::uintptr_t kCPoolPedNew = 0x001D7B60u;
 // CVehicle* CPool<CVehicle>::New() — аллокация слота транспорта
 inline constexpr std::uintptr_t kCPoolVehicleNew = 0x002CA290u;
 
+// float CEntity::GetDistanceFromCentreOfMassToBaseOfModel() — высота покоя машины при спавне
+inline constexpr std::uintptr_t kCEntityDistToBase = 0x0014F7E0u;
+
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 

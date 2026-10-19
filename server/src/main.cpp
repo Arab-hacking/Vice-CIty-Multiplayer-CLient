@@ -407,9 +407,10 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         vehicle.id = g_nextVehicleId++;
         vehicle.model = static_cast<std::uint16_t>(model);
         vehicle.ownerId = session.playerId;
+        // z — уровень земли (ноги игрока); клиент добавит высоту покоя модели.
         vehicle.position = {session.position.x + session.moveDirX * 6.0f,
                             session.position.y + session.moveDirY * 6.0f,
-                            session.position.z + 0.5f};
+                            session.position.z};
         vehicle.heading = std::atan2(-session.moveDirX, session.moveDirY);
         g_vehicles.push_back(vehicle);
         StreamTick(socket, sessions); // машина появится сразу

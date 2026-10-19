@@ -47,9 +47,11 @@ FILE* g_log = nullptr;
 
 struct SpawnedVehicle {
     void* vehicle = nullptr;
+    void* vtable = nullptr; // сверка «слот пула ещё наш» (игра могла удалить машину)
     std::uint16_t model = 0;
     vc::Vector3 spawnPos{};
     float spawnHeading = 0.0f;
+    long long spawnTick = 0;
     int attempts = 0;                 // неудачных попыток создания
     long long nextRetryTick = 0;      // раньше этого кадра не повторять
     bool fellReported = false;        // watchdog уже ругался в лог
@@ -107,16 +109,38 @@ bool PlaceVehicleRaw(void* vehicle, float x, float y, float z, float heading) {
     }
 }
 
-// Прочитать текущую позицию машины (watchdog). False — указатель битый.
-bool ReadVehiclePosRaw(void* vehicle, float* out) {
+// Прочитать позицию + флаги машины (телеметрия). False — указатель битый.
+bool ReadVehiclePosRaw(void* vehicle, float* out, unsigned int* flagsOut) {
     VC_TRY {
         const auto* base = static_cast<const char*>(vehicle);
         out[0] = *reinterpret_cast<const float*>(base + 0x38);
         out[1] = *reinterpret_cast<const float*>(base + 0x3C);
         out[2] = *reinterpret_cast<const float*>(base + 0x40);
+        *flagsOut = *reinterpret_cast<const unsigned int*>(base + 0x60);
         return true;
     } VC_EXCEPT {
         return false;
+    }
+}
+
+// Слот пула всё ещё «наш»? Игра могла удалить машину и отдать слот трафику:
+// трогать такой объект (Remove/деструктор) нельзя — краш/порча секторов мира.
+bool VehicleStillOursRaw(void* vehicle, void* vtable, std::uint16_t model) {
+    VC_TRY {
+        const auto* base = static_cast<const char*>(vehicle);
+        void* nowVtable = *reinterpret_cast<void* const*>(base);
+        const auto nowModel = *reinterpret_cast<const std::uint16_t*>(base + 0x6C);
+        return nowVtable == vtable && nowModel == model;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+void* ReadVehicleVtableRaw(void* vehicle) {
+    VC_TRY {
+        return *reinterpret_cast<void**>(vehicle);
+    } VC_EXCEPT {
+        return nullptr;
     }
 }
 
@@ -134,7 +158,12 @@ void* CreateVehicleRaw(void* pool, int model, float x, float y, float z, float h
         void* vehicle = game::Resolve<AutomobileCtorFn>(game::revc::kCAutomobileCtor)(
             memory, model, kMissionVehicle);
         if (!vehicle) return nullptr;
-        PlaceVehicleRaw(vehicle, x, y, z, heading);
+        // Высота покоя как у генераторов парковок: z земли (ноги игрока от
+        // сервера) + расстояние от центра масс до низа модели.
+        using DistToBaseFn = float (*)(void*);
+        float dist = game::Resolve<DistToBaseFn>(game::revc::kCEntityDistToBase)(vehicle);
+        if (!(dist >= 0.0f && dist <= 3.0f)) dist = 0.5f;
+        PlaceVehicleRaw(vehicle, x, y, z + dist, heading);
         game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(vehicle);
         *failStage = 0;
         return vehicle;
@@ -178,6 +207,22 @@ void DestroyVehicleRaw(void* vehicle) {
     }
 }
 
+// Безопасное удаление: только если слот пула всё ещё наш. Если игра сама
+// удалила машину — просто перестаём отслеживать (второй деструктор = краш).
+void DestroyVehicle(SpawnedVehicle& spawned, std::uint16_t id) {
+    if (!spawned.vehicle) return;
+    if (VehicleStillOursRaw(spawned.vehicle, spawned.vtable, spawned.model)) {
+        DestroyVehicleRaw(spawned.vehicle);
+    } else {
+        char buf[96];
+        std::snprintf(buf, sizeof(buf),
+                      "vpool: машина id %u уже удалена игрой — пропускаю деструктор\n", id);
+        Log(buf);
+    }
+    spawned.vehicle = nullptr;
+    spawned.vtable = nullptr;
+}
+
 } // namespace
 
 VehiclePool& VehiclePool::Instance() {
@@ -200,7 +245,7 @@ void VehiclePool::Tick() {
             continue;
         }
         if (it->second.vehicle) {
-            DestroyVehicleRaw(it->second.vehicle);
+            DestroyVehicle(it->second, it->first);
             char buf[64];
             std::snprintf(buf, sizeof(buf), "vpool: машина id %u удалена\n", it->first);
             Log(buf);
@@ -216,34 +261,47 @@ void VehiclePool::Tick() {
     for (const auto& remote : remotes) {
         SpawnedVehicle& spawned = g_vehicles[remote.id];
         if (spawned.vehicle && spawned.model != remote.model) {
-            DestroyVehicleRaw(spawned.vehicle);
-            spawned.vehicle = nullptr;
+            DestroyVehicle(spawned, remote.id);
             spawned.attempts = 0;
         }
         if (spawned.vehicle) {
-            // Модель надо держать загруженной, как это делают генераторы парковок:
-            // пере-запрос раз в ~0.5 с флагами «не выгружать».
-            if (g_tickCount % 30 == 0)
+            if (g_tickCount % 30 == 0) {
+                // Слот ещё наш? Если игра удалила машину — не трогаем её больше.
+                if (!VehicleStillOursRaw(spawned.vehicle, spawned.vtable, spawned.model)) {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf),
+                                  "vpool: игра удалила машину id %u через ~%lld кадров\n",
+                                  remote.id, g_tickCount - spawned.spawnTick);
+                    Log(buf);
+                    spawned.vehicle = nullptr;
+                    spawned.vtable = nullptr;
+                    spawned.attempts = kMaxCreateAttempts; // не пересоздавать в цикле
+                    continue;
+                }
+                // Модель надо держать загруженной, как это делают генераторы
+                // парковок: пере-запрос раз в ~0.5 с флагами «не выгружать».
                 game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(
                     remote.model, kStreamFlagsKeep);
-            // Watchdog: машина не должна проваливаться под землю. Если провалилась
-            // (коллизию всё же выгрузили / физика вытолкнула) — лог + перестановка.
-            if (g_tickCount % 120 == 0) {
+            }
+            // Телеметрия первых ~30 секунд + предупреждение о провале (БЕЗ
+            // вмешательства в физику — перестановка в 0.6.10 довела до краша).
+            if (g_tickCount % 60 == 0 && g_tickCount - spawned.spawnTick <= 1800) {
                 float pos[3] = {};
-                if (ReadVehiclePosRaw(spawned.vehicle, pos) &&
-                    pos[2] < spawned.spawnPos.z - 8.0f) {
+                unsigned int flags = 0;
+                if (ReadVehiclePosRaw(spawned.vehicle, pos, &flags)) {
                     char buf[160];
                     std::snprintf(buf, sizeof(buf),
-                                  "vpool: машина id %u провалилась (z=%.1f, спавн %.1f) — "
-                                  "возвращаю на место\n",
-                                  remote.id, pos[2], spawned.spawnPos.z);
+                                  "vpool-diag: id %u pos=(%.1f, %.1f, %.1f) flags=0x%x\n",
+                                  remote.id, pos[0], pos[1], pos[2], flags);
                     Log(buf);
-                    spawned.fellReported = true;
-                    game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldRemove)(
-                        spawned.vehicle);
-                    PlaceVehicleRaw(spawned.vehicle, spawned.spawnPos.x, spawned.spawnPos.y,
-                                    spawned.spawnPos.z, spawned.spawnHeading);
-                    game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(spawned.vehicle);
+                    if (pos[2] < spawned.spawnPos.z - 8.0f && !spawned.fellReported) {
+                        spawned.fellReported = true;
+                        std::snprintf(buf, sizeof(buf),
+                                      "vpool: машина id %u проваливается! "
+                                      "(z=%.1f при спавне %.1f)\n",
+                                      remote.id, pos[2], spawned.spawnPos.z);
+                        Log(buf);
+                    }
                 }
             }
             continue;
@@ -265,12 +323,23 @@ void VehiclePool::Tick() {
             continue;
         }
         spawned.model = remote.model;
+        spawned.vtable = ReadVehicleVtableRaw(spawned.vehicle);
+        spawned.spawnTick = g_tickCount;
         spawned.spawnPos = remote.position;
+        {
+            float pos[3] = {};
+            unsigned int flags = 0;
+            if (ReadVehiclePosRaw(spawned.vehicle, pos, &flags))
+                spawned.spawnPos = vc::Vector3{pos[0], pos[1], pos[2]};
+        }
         spawned.spawnHeading = remote.heading;
         spawned.attempts = 0;
-        char buf[96];
-        std::snprintf(buf, sizeof(buf), "vpool: машина id %u (модель %u) создана\n",
-                      remote.id, remote.model);
+        spawned.fellReported = false;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf),
+                      "vpool: машина id %u (модель %u) создана в (%.1f, %.1f, %.1f)\n",
+                      remote.id, remote.model, spawned.spawnPos.x, spawned.spawnPos.y,
+                      spawned.spawnPos.z);
         Log(buf);
     }
 }
