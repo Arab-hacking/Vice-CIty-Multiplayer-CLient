@@ -42,6 +42,7 @@ ProcessControlFn g_origProcessControl = nullptr;
 
 struct Puppet {
     void* ped = nullptr;
+    std::string nick;
     vc::Vector3 current{};
 };
 
@@ -112,6 +113,13 @@ PlayerPool& PlayerPool::Instance() {
 
 bool PlayerPool::IsPuppet(const void* ped) const { return g_puppetPeds.contains(ped); }
 
+std::vector<PuppetRenderInfo> PlayerPool::RenderInfos() const {
+    std::vector<PuppetRenderInfo> out;
+    for (const auto& [id, puppet] : g_puppets)
+        if (puppet.ped) out.push_back({puppet.nick, puppet.current});
+    return out;
+}
+
 void PlayerPool::Init(FILE* log) {
     g_log = log;
     // MinHook мог уже инициализировать оверлей — ALREADY_INITIALIZED тоже ок.
@@ -159,6 +167,7 @@ void PlayerPool::Tick() {
     for (const auto& remote : remotes) {
         if (!remote.hasPosition) continue;
         Puppet& puppet = g_puppets[remote.id];
+        puppet.nick = remote.nick;
         if (!puppet.ped) {
             // Позиция (0,0,0) — игрок только подключился, sync ещё не приходил.
             const vc::Vector3& tp = remote.targetPosition;

@@ -112,4 +112,10 @@ inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 // void CPlaceable::SetHeading(float) — на будущее
 inline constexpr std::uintptr_t kCPlaceableSetHeading = 0x0010E810u;
 
+// bool CSprite::CalcScreenCoors(in, out, w, h, check) — мир->экран для никнеймов
+inline constexpr std::uintptr_t kCSpriteCalcScreenCoors = 0x0025ED00u;
+
+// void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы (следующий шаг)
+inline constexpr std::uintptr_t kCPedSetMoveState = 0x001E9E00u;
+
 } // namespace vc::game::revc

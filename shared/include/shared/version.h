@@ -8,6 +8,6 @@ namespace vc {
 // изменении формата пакетов (см. docs/NETWORK-PROTOCOL.md).
 inline constexpr std::uint32_t PROTOCOL_VERSION = 2;
 
-inline constexpr const char* CLIENT_VERSION = "0.6.3-dev";
+inline constexpr const char* CLIENT_VERSION = "0.6.4-dev";
 
 } // namespace vc

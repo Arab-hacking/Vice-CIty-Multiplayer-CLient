@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -93,6 +94,7 @@ struct Session {
     bool hasPosition = false;
     float moveDirX = 0.0f; // последнее направление движения (бот встаёт перед игроком)
     float moveDirY = 1.0f;
+    std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
 
@@ -130,6 +132,64 @@ void Broadcast(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessi
     }
 }
 
+// --- Стриминг по радиусу: клиент видит только тех, кто ближе 250 м. ---
+constexpr float kStreamRadius = 250.0f;
+
+struct VisibleEntity {
+    std::uint16_t id;
+    std::string nick;
+    vc::Vector3 position;
+};
+
+std::vector<VisibleEntity> BuildEntities(const std::map<std::string, Session>& sessions) {
+    std::vector<VisibleEntity> out;
+    for (const auto& [key, s] : sessions)
+        if (s.joined) out.push_back({s.playerId, s.nick, s.position});
+    for (const auto& b : g_bots) out.push_back({b.id, b.nick, b.position});
+    return out;
+}
+
+// SyncUpdate только тем, у кого объект в стриме.
+void SendSyncToViewers(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
+                       std::uint16_t moverId, const std::vector<std::uint8_t>& payload) {
+    for (auto& [key, session] : sessions) {
+        if (!session.joined || session.playerId == moverId) continue;
+        if (!session.streamedIn.contains(moverId)) continue;
+        Send(socket, session, payload, vc::net::Reliability::UnreliableSequenced, 1);
+    }
+}
+
+// Раз в 500 мс сверяем видимость: новые в радиусе -> StreamIn, ушедшие -> StreamOut.
+void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions) {
+    const auto entities = BuildEntities(sessions);
+    for (auto& [key, session] : sessions) {
+        if (!session.joined) continue;
+        std::set<std::uint16_t> desired;
+        for (const auto& e : entities) {
+            if (e.id == session.playerId) continue;
+            const float dx = e.position.x - session.position.x;
+            const float dy = e.position.y - session.position.y;
+            const float dz = e.position.z - session.position.z;
+            if (dx * dx + dy * dy + dz * dz <= kStreamRadius * kStreamRadius)
+                desired.insert(e.id);
+        }
+        for (std::uint16_t id : desired) {
+            if (session.streamedIn.contains(id)) continue;
+            const auto it = std::find_if(entities.begin(), entities.end(),
+                                         [&](const VisibleEntity& e) { return e.id == id; });
+            if (it != entities.end())
+                Send(socket, session,
+                     vc::protocol::BuildPlayerStreamIn({it->id, it->nick, it->position}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        }
+        for (std::uint16_t id : session.streamedIn)
+            if (!desired.contains(id))
+                Send(socket, session, vc::protocol::BuildPlayerStreamOut(id),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        session.streamedIn = desired;
+    }
+}
+
 std::size_t JoinedCount(const std::map<std::string, Session>& sessions) {
     std::size_t n = 0;
     for (const auto& [key, s] : sessions) n += s.joined ? 1 : 0;
@@ -145,7 +205,11 @@ void RemoveBotOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& ses
     std::printf("[server] Бот %s (id %u) убран\n", it->nick.c_str(), botId);
     std::fflush(stdout);
     g_bots.erase(it);
-    Broadcast(socket, sessions, vc::protocol::BuildPlayerStreamOut(botId));
+    for (auto& [key, session] : sessions) {
+        if (session.streamedIn.erase(botId) > 0 && session.joined)
+            Send(socket, session, vc::protocol::BuildPlayerStreamOut(botId),
+                 vc::net::Reliability::ReliableOrdered, 0);
+    }
 }
 
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
@@ -181,8 +245,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             bot.center = front;
             bot.position = front;
             g_bots.push_back(bot);
-            Broadcast(socket, sessions,
-                      vc::protocol::BuildPlayerStreamIn({bot.id, bot.nick, bot.position}));
+            StreamTick(socket, sessions); // кукла появится сразу, не через 500 мс
             reply("Бот " + bot.nick + " появился перед тобой! /unbot - убрать");
             std::printf("[server] Создан бот %s (id %u) для %s\n", bot.nick.c_str(), bot.id,
                         session.nick.c_str());
@@ -218,6 +281,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
             RemoveBotOf(socket, sessions, session.playerId);
+            for (auto& [key, other] : sessions) other.streamedIn.erase(session.playerId);
         }
         return true;
     }
@@ -258,23 +322,8 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildServerMessage(session.nick + " подключился к серверу"),
                       &session);
-            // Этап 3: новичку — все существующие игроки, остальным — новичок.
-            for (auto& [otherKey, other] : sessions) {
-                if (!other.joined || &other == &session) continue;
-                Send(socket, session,
-                     vc::protocol::BuildPlayerStreamIn(
-                         {other.playerId, other.nick, other.position}),
-                     vc::net::Reliability::ReliableOrdered, 0);
-            }
-            Broadcast(socket, sessions,
-                      vc::protocol::BuildPlayerStreamIn(
-                          {session.playerId, session.nick, session.position}),
-                      &session);
-            // Новичку — также уже существующих серверных ботов.
-            for (const auto& bot : g_bots)
-                Send(socket, session,
-                     vc::protocol::BuildPlayerStreamIn({bot.id, bot.nick, bot.position}),
-                     vc::net::Reliability::ReliableOrdered, 0);
+            // Видимость (игроки и боты в радиусе 250 м) раздаёт StreamTick.
+            StreamTick(socket, sessions);
         }
         Send(socket, session,
              vc::protocol::BuildConnectionAccepted({session.playerId, g_config.maxPlayers}),
@@ -308,10 +357,9 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             }
             session.position = *pos;
             session.hasPosition = true;
-            // Ретрансляция остальным — из этих пакетов клиенты двигают кукол.
-            Broadcast(socket, sessions,
-                      vc::protocol::BuildPlayerSyncUpdate({session.playerId, *pos}), &session,
-                      vc::net::Reliability::UnreliableSequenced, 1);
+            // Ретрансляция зрителям в радиусе — из этих пакетов клиенты двигают кукол.
+            SendSyncToViewers(socket, sessions, session.playerId,
+                              vc::protocol::BuildPlayerSyncUpdate({session.playerId, *pos}));
             const float dx = pos->x - session.lastLoggedPosition.x;
             const float dy = pos->y - session.lastLoggedPosition.y;
             const float dz = pos->z - session.lastLoggedPosition.z;
@@ -442,11 +490,20 @@ int main(int argc, char** argv) {
                     Broadcast(socket, sessions,
                               vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
                     RemoveBotOf(socket, sessions, session.playerId);
+                    const std::uint16_t goneId = session.playerId;
+                    for (auto& [otherKey, other] : sessions) other.streamedIn.erase(goneId);
                 }
                 it = sessions.erase(it);
             } else {
                 ++it;
             }
+        }
+
+        // Стриминг по радиусу — раз в 500 мс.
+        static std::uint64_t lastStreamTick = 0;
+        if (now - lastStreamTick >= 500) {
+            lastStreamTick = now;
+            StreamTick(socket, sessions);
         }
 
         // Серверные боты (/bot): круг радиусом 3 м вокруг точки спавна, 10 Гц.
@@ -457,9 +514,8 @@ int main(int argc, char** argv) {
                 bot.phase += 0.12f; // ~1.2 рад/с -> скорость ~3.6 м/с
                 bot.position = {bot.center.x + std::cos(bot.phase) * 3.0f,
                                 bot.center.y + std::sin(bot.phase) * 3.0f, bot.center.z};
-                Broadcast(socket, sessions,
-                          vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position}), nullptr,
-                          vc::net::Reliability::UnreliableSequenced, 1);
+                SendSyncToViewers(socket, sessions, bot.id,
+                                  vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position}));
             }
         }
     }
