@@ -27,6 +27,17 @@ namespace {
 using PoolNewFn = void* (*)(void*);
 using CivilianCtorFn = void* (*)(void*, int, unsigned int);
 using TeleportFn = void (*)(void*, game::CVector);
+using UpdateRwFrameFn = void (*)(void*);
+
+// Перемещение куклы. Teleport пишет позицию в матрицу сущности (тень и
+// физика её видят), но мировая матрица Rw-клампа модели пересчитывается
+// только в UpdateRwFrame — без него МОДЕЛЬ остаётся стоять на месте
+// спавна, пока тень ездит по кругу (наблюдение владельца, 0.6.4).
+void MovePuppet(void* ped, const vc::Vector3& position) {
+    game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
+        ped, game::CVector{position.x, position.y, position.z});
+    game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(ped);
+}
 using WorldAddRemoveFn = void (*)(void*);
 using RequestModelFn = void (*)(int, int);
 using LoadAllModelsFn = void (*)(bool);
@@ -93,7 +104,7 @@ void* CreatePuppet(const vc::Vector3& position) {
     void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
         memory, kPedTypeCivMale, static_cast<unsigned int>(kPuppetModelId));
     if (!ped) return nullptr;
-    game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(ped, game::CVector{position.x, position.y, position.z});
+    MovePuppet(ped, position);
     game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
     return ped;
 }
@@ -194,8 +205,7 @@ void PlayerPool::Tick() {
             puppet.current.y += dy * kSmooth;
             puppet.current.z += dz * kSmooth;
         }
-        game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
-            puppet.ped, game::CVector{puppet.current.x, puppet.current.y, puppet.current.z});
+        MovePuppet(puppet.ped, puppet.current);
 
         // Диагностика (0.6.3): раз в ~5 c печатаем цель/текущую/счётчик синков,
         // чтобы понять, где рвётся движение куклы.

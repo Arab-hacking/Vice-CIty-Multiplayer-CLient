@@ -58,6 +58,7 @@ CURATED = [
     ("kCPlaceableSetHeading", "?SetHeading@CPlaceable@@QEAAXM@Z", "void CPlaceable::SetHeading(float) — на будущее"),
     ("kCSpriteCalcScreenCoors", "?CalcScreenCoors@CSprite@@SA_NAEBUV3d@rw@@PEAU23@PEAM2_N@Z", "bool CSprite::CalcScreenCoors(in, out, w, h, check) — мир->экран для никнеймов"),
     ("kCPedSetMoveState", "?SetMoveState@CPed@@QEAAXW4eMoveState@@@Z", "void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы (следующий шаг)"),
+    ("kCEntityUpdateRwFrame", "?UpdateRwFrame@CEntity@@QEAAXXZ", "void CEntity::UpdateRwFrame() — пересчёт матрицы Rw-клампа (без него модель не едет за позицией)"),
 ]
 
 

@@ -118,4 +118,7 @@ inline constexpr std::uintptr_t kCSpriteCalcScreenCoors = 0x0025ED00u;
 // void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы (следующий шаг)
 inline constexpr std::uintptr_t kCPedSetMoveState = 0x001E9E00u;
 
+// void CEntity::UpdateRwFrame() — пересчёт матрицы Rw-клампа (без него модель не едет за позицией)
+inline constexpr std::uintptr_t kCEntityUpdateRwFrame = 0x00151090u;
+
 } // namespace vc::game::revc
