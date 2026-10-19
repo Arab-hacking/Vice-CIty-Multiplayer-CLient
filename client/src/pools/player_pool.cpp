@@ -18,6 +18,7 @@
 
 #include <MinHook.h>
 
+#include "../core/seh_guard.h"
 #include "../game/revc.h"
 #include "../network/net_client.h"
 #include "player_pool.h"
@@ -32,12 +33,11 @@ using SetHeadingFn = void (*)(void*, float);
 using SetMoveStateFn = void (*)(void*, int);
 using WorldAddRemoveFn = void (*)(void*);
 using RequestModelFn = void (*)(int, int);
-using LoadAllModelsFn = void (*)(bool);
 using ProcessControlFn = void (*)(void*);
 using DeletingDtorFn = void* (*)(void*, unsigned int);
 
 constexpr int kPedTypeCivMale = 4; // ePedType из reVC
-constexpr int kModelWarmupFrames = 30;
+constexpr int kModelWarmupFrames = 90; // модель грузит сам CStreaming::Update игры
 // eMoveState в reVC: NONE=0, STILL=1, WALK=2, RUN=3, SPRINT=4 (визуально, без риска).
 constexpr int kMoveStill = 1;
 constexpr int kMoveWalk = 2;
@@ -73,18 +73,62 @@ void HookProcessControl(void* self) {
 }
 
 // True, когда модель запрошена и ей дали время загрузиться.
+// ВАЖНО: LoadAllRequestedModels НЕ вызываем — он блокирует поток до конца
+// загрузки и на проблемной модели может крутиться вечно. Запрошенные модели
+// и так догружает собственный CStreaming::Update игры каждый кадр.
 bool EnsureModelReady(int modelId) {
     auto [it, inserted] = g_modelWarmup.try_emplace(modelId, 0);
     if (inserted) {
+        Log("pool: запрашиваю модель " + std::to_string(modelId) + "\n");
         game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(modelId, 0);
         return false;
     }
     if (it->second < kModelWarmupFrames) {
-        game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
         ++it->second;
         return false;
     }
     return true;
+}
+
+// --- SEH-обёртки (POD-функции без C++-объектов): падение внутри игровых
+// вызовов превращается в запись в лог, а не в вылет процесса. ---
+
+void* CreatePuppetRaw(void* pool, int skin, float x, float y, float z, float heading) {
+    VC_TRY {
+        void* memory = game::Resolve<PoolNewFn>(game::revc::kCPoolPedNew)(pool);
+        if (!memory) return nullptr;
+        void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
+            memory, kPedTypeCivMale, static_cast<unsigned int>(skin));
+        if (!ped) return nullptr;
+        game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(ped, game::CVector{x, y, z});
+        game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(ped, heading);
+        game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
+        return ped;
+    } VC_EXCEPT {
+        return nullptr;
+    }
+}
+
+bool DestroyPuppetRaw(void* ped) {
+    VC_TRY {
+        game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldRemove)(ped);
+        void** vtable = *reinterpret_cast<void***>(ped);
+        reinterpret_cast<DeletingDtorFn>(vtable[0])(ped, 1);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+bool MovePuppetRaw(void* ped, float x, float y, float z, float heading, int moveState) {
+    VC_TRY {
+        game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(ped, game::CVector{x, y, z});
+        game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(ped, heading);
+        game::Resolve<SetMoveStateFn>(game::revc::kCPedSetMoveState)(ped, moveState);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
 }
 
 void* CreatePuppet(int skin, const vc::Vector3& position, float heading) {
@@ -94,25 +138,14 @@ void* CreatePuppet(int skin, const vc::Vector3& position, float heading) {
         Log("pool: ms_pPedPool == nullptr (мир ещё не готов)\n");
         return nullptr;
     }
-    void* memory = game::Resolve<PoolNewFn>(game::revc::kCPoolPedNew)(pool);
-    if (!memory) {
-        Log("pool: CPool<CPed>::New() вернул nullptr (пул полон)\n");
-        return nullptr;
-    }
-    void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
-        memory, kPedTypeCivMale, static_cast<unsigned int>(skin));
-    if (!ped) return nullptr;
-    game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
-        ped, game::CVector{position.x, position.y, position.z});
-    game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(ped, heading);
-    game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
+    void* ped = CreatePuppetRaw(pool, skin, position.x, position.y, position.z, heading);
+    if (!ped) Log("pool: создание педа не удалось (пул пуст или исключение игры)\n");
     return ped;
 }
 
 void DestroyPuppet(void* ped) {
-    game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldRemove)(ped);
-    void** vtable = *reinterpret_cast<void***>(ped);
-    reinterpret_cast<DeletingDtorFn>(vtable[0])(ped, 1); // деструктор + возврат слота в пул
+    if (!DestroyPuppetRaw(ped))
+        Log("pool: исключение при удалении куклы (указатель уже невалиден?)\n");
 }
 
 // Кратчайший доворот угла.
@@ -157,7 +190,26 @@ void PlayerPool::Init(FILE* log) {
     }
 }
 
-void PlayerPool::Tick() {
+void PlayerPool::Tick(bool worldReady) {
+    if (!worldReady) return; // меню/загрузка: мир не трогаем
+
+    // Сменился локальный пед (новая игра/загрузка сейва) — старые куклы уже
+    // уничтожены самой игрой, наши указатели висячие. Просто забываем их.
+    {
+        static void* lastLocalPed = nullptr;
+        auto findPed = game::Resolve<game::FindPlayerPedFn>(game::revc::kFindPlayerPed);
+        void* localPed = findPed ? findPed() : nullptr;
+        if (localPed != lastLocalPed) {
+            if (lastLocalPed != nullptr) {
+                for (auto& [id, puppet] : g_puppets) puppet.ped = nullptr;
+                g_puppetPeds.clear();
+                Log("pool: локальный пед сменился (перезагрузка мира) — куклы сброшены\n");
+            }
+            lastLocalPed = localPed;
+        }
+        if (!localPed) return;
+    }
+
     const auto remotes = network::NetClient::Instance().RemotePlayers();
 
     // Удаление вышедших/вышедших из стрима.
@@ -177,10 +229,6 @@ void PlayerPool::Tick() {
         }
     }
     if (remotes.empty()) return;
-
-    // Спавнить можно только когда локальный игрок уже в мире.
-    auto findPed = game::Resolve<game::FindPlayerPedFn>(game::revc::kFindPlayerPed);
-    if (!findPed || !findPed()) return;
 
     for (const auto& remote : remotes) {
         if (!remote.hasPosition) continue;
@@ -228,14 +276,16 @@ void PlayerPool::Tick() {
         }
         puppet.heading = LerpAngle(puppet.heading, remote.heading, 0.25f);
 
-        game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
-            puppet.ped, game::CVector{puppet.current.x, puppet.current.y, puppet.current.z});
-        game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(puppet.ped,
-                                                                        puppet.heading);
         // Анимация по скорости (~60 fps): >0.09 м/кадр — бег, >0.015 — ходьба.
         const int moveState =
             frameSpeed > 0.09f ? kMoveRun : (frameSpeed > 0.015f ? kMoveWalk : kMoveStill);
-        game::Resolve<SetMoveStateFn>(game::revc::kCPedSetMoveState)(puppet.ped, moveState);
+        if (!MovePuppetRaw(puppet.ped, puppet.current.x, puppet.current.y, puppet.current.z,
+                           puppet.heading, moveState)) {
+            // Игра, видимо, сама удалила педа — забываем указатель, переспавним.
+            Log("pool: исключение при движении куклы " + remote.nick + ", переспавн\n");
+            g_puppetPeds.erase(puppet.ped);
+            puppet.ped = nullptr;
+        }
     }
 }
 

@@ -22,7 +22,8 @@ public:
     static PlayerPool& Instance();
 
     void Init(FILE* log);
-    void Tick();
+    // worldReady=false (меню/загрузка) — мир не трогаем вообще.
+    void Tick(bool worldReady);
 
     [[nodiscard]] bool IsPuppet(const void* ped) const;
     // Для никнеймов в оверлее. Вызывать из того же (игрового) потока.
