@@ -187,6 +187,18 @@ void PlayerPool::Tick() {
         }
         game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
             puppet.ped, game::CVector{puppet.current.x, puppet.current.y, puppet.current.z});
+
+        // Диагностика (0.6.3): раз в ~5 c печатаем цель/текущую/счётчик синков,
+        // чтобы понять, где рвётся движение куклы.
+        static std::uint64_t diagFrame = 0;
+        if (g_log && (++diagFrame % 300 == 0)) {
+            std::fprintf(g_log,
+                         "pool[diag]: %s target=(%.1f, %.1f, %.1f) current=(%.1f, %.1f, %.1f) "
+                         "syncs=%u\n",
+                         remote.nick.c_str(), target.x, target.y, target.z, puppet.current.x,
+                         puppet.current.y, puppet.current.z, remote.syncCount);
+            std::fflush(g_log);
+        }
     }
 }
 

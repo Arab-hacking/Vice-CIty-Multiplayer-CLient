@@ -141,6 +141,7 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         if (it != m_remotePlayers.end()) {
             it->second.targetPosition = update->position;
             it->second.hasPosition = true;
+            ++it->second.syncCount;
         }
     }
 }

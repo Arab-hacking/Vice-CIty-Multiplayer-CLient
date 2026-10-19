@@ -84,6 +84,14 @@ int main(int argc, char** argv) {
                                 si->nick.c_str(), si->playerId, si->position.x,
                                 si->position.y, si->position.z);
                     std::fflush(stdout);
+                } else if (auto su = vc::protocol::ParsePlayerSyncUpdate(payload)) {
+                    static int syncPrinted = 0;
+                    if (syncPrinted < 8) {
+                        ++syncPrinted;
+                        std::printf("[bot] sync id %u -> (%.1f, %.1f, %.1f)\n", su->playerId,
+                                    su->position.x, su->position.y, su->position.z);
+                        std::fflush(stdout);
+                    }
                 } else if (auto rej = vc::protocol::ParseConnectionRejected(payload)) {
                     std::printf("vc-bot: ОТКАЗ: %s\n", rej->c_str());
                     return 1;
@@ -94,7 +102,9 @@ int main(int argc, char** argv) {
         for (const auto& resend : peer.CollectResends(NowMs()))
             socket.SendTo(server, resend);
 
-        if (accepted && !chatSent) {
+        // Чат — через 1.5 c после старта: сервер уже получил синки и знает позицию
+        // (иначе /bot отклоняется гардом hasPosition).
+        if (accepted && !chatSent && NowMs() - started >= 1500) {
             chatSent = true;
             send(vc::protocol::BuildChatMessage(say),
                  vc::net::Reliability::ReliableOrdered, 0);

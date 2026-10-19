@@ -45,6 +45,7 @@ public:
         std::string nick;
         vc::Vector3 targetPosition{};
         bool hasPosition = false;
+        std::uint32_t syncCount = 0; // диагностика: сколько SyncUpdate пришло
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
 
