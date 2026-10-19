@@ -48,6 +48,10 @@ struct ServerConfig {
     std::uint16_t port = 7777;
     std::uint16_t maxPlayers = 100;
     std::string gamemode = "freeroam";
+    // Спавн-пойнт: особняк Версетти по умолчанию; `spawnpos none` отключает.
+    bool spawnEnabled = true;
+    vc::Vector3 spawnPos{-378.5f, -589.1f, 25.6f};
+    float spawnHeading = 0.0f;
 };
 ServerConfig g_config;
 
@@ -74,6 +78,19 @@ bool LoadConfig(const std::string& path, ServerConfig& cfg) {
         rest = Trim(rest);
         if (key == "hostname" && !rest.empty()) cfg.hostname = rest;
         else if (key == "gamemode" && !rest.empty()) cfg.gamemode = rest;
+        else if (key == "spawnpos") {
+            if (rest == "none") {
+                cfg.spawnEnabled = false;
+            } else {
+                std::istringstream ss(rest);
+                float x = 0, y = 0, z = 0, h = 0;
+                if (ss >> x >> y >> z) {
+                    cfg.spawnPos = {x, y, z};
+                    if (ss >> h) cfg.spawnHeading = h;
+                    cfg.spawnEnabled = true;
+                }
+            }
+        }
         else if (key == "port") cfg.port = static_cast<std::uint16_t>(std::atoi(rest.c_str()));
         else if (key == "maxplayers")
             cfg.maxPlayers = static_cast<std::uint16_t>(std::atoi(rest.c_str()));
@@ -95,6 +112,8 @@ struct Session {
     float moveDirX = 0.0f; // последнее направление движения (бот встаёт перед игроком)
     float moveDirY = 1.0f;
     std::uint8_t health = 100;
+    std::uint16_t skin = 7;
+    bool dead = false; // между Death-пакетом и первым синком с HP>0 (респавн)
     std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
@@ -138,6 +157,7 @@ constexpr float kStreamRadius = 250.0f;
 
 struct VisibleEntity {
     std::uint16_t id;
+    std::uint16_t skin;
     std::string nick;
     vc::Vector3 position;
 };
@@ -145,8 +165,8 @@ struct VisibleEntity {
 std::vector<VisibleEntity> BuildEntities(const std::map<std::string, Session>& sessions) {
     std::vector<VisibleEntity> out;
     for (const auto& [key, s] : sessions)
-        if (s.joined) out.push_back({s.playerId, s.nick, s.position});
-    for (const auto& b : g_bots) out.push_back({b.id, b.nick, b.position});
+        if (s.joined && !s.dead) out.push_back({s.playerId, s.skin, s.nick, s.position});
+    for (const auto& b : g_bots) out.push_back({b.id, 7, b.nick, b.position});
     return out;
 }
 
@@ -180,7 +200,8 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
                                          [&](const VisibleEntity& e) { return e.id == id; });
             if (it != entities.end())
                 Send(socket, session,
-                     vc::protocol::BuildPlayerStreamIn({it->id, it->nick, it->position}),
+                     vc::protocol::BuildPlayerStreamIn(
+                         {it->id, it->skin, it->nick, it->position}),
                      vc::net::Reliability::ReliableOrdered, 0);
         }
         for (std::uint16_t id : session.streamedIn)
@@ -214,7 +235,7 @@ void RemoveBotOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& ses
 }
 
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
-// Шаг 2: только /help, /bot, /unbot.
+// Команды: /help, /bot, /unbot, /skin, /tp, /kill, /pos, /players.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId, const std::string& text) {
     auto reply = [&](const std::string& msg) {
@@ -223,10 +244,15 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     };
     std::printf("[cmd] %s: %s\n", session.nick.c_str(), text.c_str());
     std::fflush(stdout);
+    std::istringstream ss(text);
+    std::string cmd;
+    ss >> cmd;
 
-    if (text == "/help") {
+    if (cmd == "/help") {
         reply("Команды: /bot - бот перед тобой, /unbot - убрать бота");
-    } else if (text == "/bot") {
+        reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
+        reply("/kill - респавн, /pos - координаты, /players - онлайн");
+    } else if (cmd == "/bot") {
         if (!session.hasPosition) {
             reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /bot");
             return;
@@ -256,9 +282,61 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             it->position = front;
             reply("Бот перемещён перед тобой");
         }
-    } else if (text == "/unbot") {
+    } else if (cmd == "/unbot") {
         RemoveBotOf(socket, sessions, session.playerId);
         reply("Бот убран");
+    } else if (cmd == "/skin") {
+        int skin = -1;
+        ss >> skin;
+        if (skin < 0 || skin > 130) {
+            reply("Использование: /skin <id 0-130> (не все id существуют!)");
+        } else {
+            session.skin = static_cast<std::uint16_t>(skin);
+            // Пересоздаём куклу у зрителей с новой моделью.
+            for (auto& [key, other] : sessions) {
+                if (!other.joined || !other.streamedIn.contains(session.playerId)) continue;
+                Send(socket, other, vc::protocol::BuildPlayerStreamOut(session.playerId),
+                     vc::net::Reliability::ReliableOrdered, 0);
+                Send(socket, other,
+                     vc::protocol::BuildPlayerStreamIn(
+                         {session.playerId, session.skin, session.nick, session.position}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+            }
+            reply("Скин сменён на " + std::to_string(skin) + " (виден другим игрокам)");
+        }
+    } else if (cmd == "/tp") {
+        float x = 0, y = 0, z = 0;
+        if (ss >> x >> y >> z) {
+            session.position = {x, y, z};
+            Send(socket, session, vc::protocol::BuildTeleport({session.position, 0.0f}),
+                 vc::net::Reliability::ReliableOrdered, 0);
+            reply("Телепорт выполнен");
+        } else {
+            reply("Использование: /tp <x> <y> <z>");
+        }
+    } else if (cmd == "/kill") {
+        if (g_config.spawnEnabled) {
+            session.position = g_config.spawnPos;
+            Send(socket, session,
+                 vc::protocol::BuildTeleport({g_config.spawnPos, g_config.spawnHeading}),
+                 vc::net::Reliability::ReliableOrdered, 0);
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildServerMessage(session.nick + " возродился"), &session);
+            reply("Ты возродился на спавне");
+        } else {
+            reply("Спавн на сервере отключён (spawnpos none)");
+        }
+    } else if (cmd == "/pos") {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Координаты: %.1f, %.1f, %.1f HP=%u",
+                      session.position.x, session.position.y, session.position.z,
+                      session.health);
+        reply(buf);
+    } else if (cmd == "/players") {
+        std::string list = "Онлайн:";
+        for (const auto& e : BuildEntities(sessions))
+            list += " " + e.nick + " (#" + std::to_string(e.id) + ")";
+        reply(list);
     } else {
         reply("Неизвестная команда. /help - список команд");
     }
@@ -337,13 +415,47 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                  std::to_string(g_config.maxPlayers)),
              vc::net::Reliability::ReliableOrdered, 0);
         Send(socket, session,
-             vc::protocol::BuildServerMessage("Команды в чате (T): /bot - бот перед тобой, "
-                                              "/unbot - убрать, /help"),
+             vc::protocol::BuildServerMessage("Команды в чате (T): /bot, /skin, /tp, /kill — "
+                                              "подробнее: /help"),
              vc::net::Reliability::ReliableOrdered, 0);
+        // Спавн-пойнт: клиент применит телепорт, когда мир загрузится.
+        if (g_config.spawnEnabled) {
+            session.position = g_config.spawnPos;
+            Send(socket, session,
+                 vc::protocol::BuildTeleport({g_config.spawnPos, g_config.spawnHeading}),
+                 vc::net::Reliability::ReliableOrdered, 0);
+        }
         return false;
     }
 
     if (!session.joined) return false;
+
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::Death)) {
+        if (!session.dead) {
+            session.dead = true;
+            std::printf("[server] Игрок %s (id %u) погиб\n", session.nick.c_str(),
+                        session.playerId);
+            std::fflush(stdout);
+            Broadcast(socket, sessions,
+                      vc::protocol::BuildServerMessage(session.nick + " погиб"), &session);
+            // Кукла исчезает у зрителей; StreamTick вернёт её после респавна.
+            for (auto& [key, other] : sessions) {
+                if (other.streamedIn.erase(session.playerId) > 0 && other.joined)
+                    Send(socket, other,
+                         vc::protocol::BuildPlayerStreamOut(session.playerId),
+                         vc::net::Reliability::ReliableOrdered, 0);
+            }
+            // Клиент применит телепорт после игрового респавна (HP снова > 0).
+            if (g_config.spawnEnabled) {
+                session.position = g_config.spawnPos;
+                Send(socket, session,
+                     vc::protocol::BuildTeleport(
+                         {g_config.spawnPos, g_config.spawnHeading}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+            }
+        }
+        return false;
+    }
 
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::OnFootSync)) {
         if (const auto sync = vc::protocol::ParseOnFootSync(payload)) {
@@ -360,6 +472,13 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             session.position = pos;
             session.health = sync->health;
             session.hasPosition = true;
+            if (session.dead && sync->health > 0) {
+                session.dead = false; // игра респавнила игрока — снова виден всем
+                std::printf("[server] Игрок %s (id %u) возродился\n", session.nick.c_str(),
+                            session.playerId);
+                std::fflush(stdout);
+            }
+            if (session.dead) return false; // мёртвого не ретранслируем
             // Ретрансляция зрителям в радиусе — из этих пакетов клиенты двигают кукол.
             SendSyncToViewers(
                 socket, sessions, session.playerId,

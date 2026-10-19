@@ -55,9 +55,10 @@ struct OnFootSyncData {
 [[nodiscard]] std::optional<OnFootSyncData> ParseOnFootSync(
     const std::vector<std::uint8_t>& payload);
 
-// PlayerStreamIn: [105][u16 id][u8 nickLen][nick][f32 x,y,z] — создать куклу игрока.
+// PlayerStreamIn: [105][u16 id][u16 skin][u8 nickLen][nick][f32 x,y,z] — кукла игрока.
 struct PlayerStreamInData {
     std::uint16_t playerId = 0;
+    std::uint16_t skin = 7;
     std::string nick;
     Vector3 position{};
 };
@@ -78,6 +79,16 @@ struct PlayerSyncUpdateData {
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data);
 [[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
+    const std::vector<std::uint8_t>& payload);
+
+// Teleport: [132][f32 x,y,z][f32 heading] — сервер перемещает локального игрока
+// (спавн-пойнт при входе, /tp, /kill и респавн после смерти).
+struct TeleportData {
+    Vector3 position{};
+    float heading = 0.0f;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildTeleport(const TeleportData& data);
+[[nodiscard]] std::optional<TeleportData> ParseTeleport(
     const std::vector<std::uint8_t>& payload);
 
 } // namespace vc::protocol

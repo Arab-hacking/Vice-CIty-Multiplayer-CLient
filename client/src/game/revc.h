@@ -34,5 +34,10 @@ using FindPlayerVehicleFn = void* (*)();
 inline constexpr std::uintptr_t kPlaceableOffset = 0x08;
 inline constexpr std::uintptr_t kPedHealthOffset = 0x454;
 inline constexpr std::uintptr_t kPedArmourOffset = 0x458;
+// Встроенная матрица CPlaceable (pos на ped+0x38) и указатель на матрицу
+// Rw-фрейма (CMatrix::pMatrix) — модель рисуется по второй, Teleport пишет
+// только первую, поэтому после перемещения копируем 0x40 байт первой во вторую.
+inline constexpr std::uintptr_t kEmbeddedMatrixOffset = 0x08;
+inline constexpr std::uintptr_t kFrameMatrixPtrOffset = 0x48;
 
 } // namespace vc::game

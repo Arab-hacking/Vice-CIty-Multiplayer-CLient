@@ -128,11 +128,13 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         RemotePlayer& remote = m_remotePlayers[streamIn->playerId];
         remote.id = streamIn->playerId;
+        remote.skin = streamIn->skin;
         remote.nick = streamIn->nick;
         remote.targetPosition = streamIn->position;
         remote.hasPosition = true;
         Log("net: stream-in игрока " + streamIn->nick + " (id " +
-            std::to_string(streamIn->playerId) + ")\n");
+            std::to_string(streamIn->playerId) + ", skin " +
+            std::to_string(streamIn->skin) + ")\n");
     } else if (auto streamOut = vc::protocol::ParsePlayerStreamOut(payload)) {
         std::lock_guard lock(m_mutex);
         m_remotePlayers.erase(*streamOut);
@@ -146,8 +148,21 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
             it->second.health = update->health;
             ++it->second.syncCount;
         }
+    } else if (auto teleport = vc::protocol::ParseTeleport(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_pendingTeleport = LocalTeleport{teleport->position, teleport->heading};
+        Log("net: сервер телепортирует нас\n");
     }
 }
+
+std::optional<NetClient::LocalTeleport> NetClient::TakePendingTeleport() {
+    std::lock_guard lock(m_mutex);
+    auto result = m_pendingTeleport;
+    m_pendingTeleport.reset();
+    return result;
+}
+
+void NetClient::NotifyDeath() { m_deathPending.store(true); }
 
 std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
     std::lock_guard lock(m_mutex);
@@ -192,6 +207,14 @@ void NetClient::ThreadMain() {
             if (auto ack = m_peer.BuildAckDatagram()) m_socket.SendTo(m_server, *ack);
         }
         for (const auto& resend : m_peer.CollectResends(now)) m_socket.SendTo(m_server, resend);
+
+        // Смерть локального игрока (заметил игровой поток по HP<=0).
+        if (m_state.load() == State::Connected && m_deathPending.exchange(false)) {
+            SendPayloadLockedPeer(
+                {static_cast<std::uint8_t>(vc::protocol::ClientPacket::Death)},
+                vc::net::Reliability::ReliableOrdered, 0, now);
+            Log("net: отправлено уведомление о смерти\n");
+        }
 
         // Исходящий чат из игрового потока.
         {

@@ -45,6 +45,25 @@ bool SafeReadPedHealth(void* ped, float* out) {
     }
 }
 
+// Телепорт локального педа: Teleport + SetHeading (this=ped+8!) + перенос
+// встроенной матрицы в матрицу Rw-фрейма + UpdateRwFrame. POD SEH-обёртка.
+bool SafeTeleportLocalPed(void* ped, float x, float y, float z, float heading) {
+    using TeleportFn = void (*)(void*, CVector);
+    using SetHeadingFn = void (*)(void*, float);
+    using UpdateRwFrameFn = void (*)(void*);
+    VC_TRY {
+        Resolve<TeleportFn>(revc::kCPedTeleport)(ped, CVector{x, y, z});
+        auto* base = static_cast<char*>(ped);
+        Resolve<SetHeadingFn>(revc::kCPlaceableSetHeading)(base + kPlaceableOffset, heading);
+        void* frameMatrix = *reinterpret_cast<void**>(base + kFrameMatrixPtrOffset);
+        if (frameMatrix) std::memcpy(frameMatrix, base + kEmbeddedMatrixOffset, 0x40);
+        Resolve<UpdateRwFrameFn>(revc::kCEntityUpdateRwFrame)(ped);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 void OnFrameAfterOriginal() {
     ++g_frame;
 
@@ -54,13 +73,52 @@ void OnFrameAfterOriginal() {
     void* ped = findPed ? findPed() : nullptr;
     std::optional<vc::Vector3> position;
     std::uint8_t health = 100;
+    float rawHealth = 100.0f;
     if (ped) {
         const CVector p = findCoors();
         position = vc::Vector3{p.x, p.y, p.z};
         float hp = 100.0f;
         if (SafeReadPedHealth(ped, &hp) && hp >= 0.0f && hp <= 1000.0f) {
+            rawHealth = hp;
             if (hp > 200.0f) hp = 200.0f; // VC: максимум с прокачкой ~200
             health = static_cast<std::uint8_t>(hp);
+        }
+    }
+
+    // Детект смерти: HP было > 0, стало <= 0 (один раз на смерть).
+    {
+        static bool wasAlive = false;
+        const bool alive = ped && rawHealth > 0.0f;
+        if (wasAlive && ped && rawHealth <= 0.0f) {
+            vc::network::NetClient::Instance().NotifyDeath();
+            if (g_log) {
+                std::fprintf(g_log, "[frame %llu] игрок погиб — уведомляем сервер\n",
+                             static_cast<unsigned long long>(g_frame));
+                std::fflush(g_log);
+            }
+        }
+        if (ped) wasAlive = alive;
+    }
+
+    // «Мир готов» для телепорта от сервера: пед жив и позиция вменяема
+    // 180 кадров подряд (не трогаем мир во время загрузки и экрана Wasted).
+    static int stableFrames = 0;
+    const bool sane = position && rawHealth > 0.0f && position->x > -5000.0f &&
+                      position->x < 5000.0f && position->y > -5000.0f &&
+                      position->y < 5000.0f && position->z > -500.0f && position->z < 5000.0f;
+    stableFrames = sane ? stableFrames + 1 : 0;
+    if (ped && stableFrames >= 180) {
+        if (auto tp = vc::network::NetClient::Instance().TakePendingTeleport()) {
+            const bool ok = SafeTeleportLocalPed(ped, tp->position.x, tp->position.y,
+                                                 tp->position.z, tp->heading);
+            if (g_log) {
+                std::fprintf(g_log, "[frame %llu] телепорт сервера (%.1f, %.1f, %.1f) ok=%d\n",
+                             static_cast<unsigned long long>(g_frame), tp->position.x,
+                             tp->position.y, tp->position.z, ok ? 1 : 0);
+                std::fflush(g_log);
+            }
+            const CVector p = findCoors();
+            position = vc::Vector3{p.x, p.y, p.z};
         }
     }
     vc::network::NetClient::Instance().SetPlayerState(position, health);

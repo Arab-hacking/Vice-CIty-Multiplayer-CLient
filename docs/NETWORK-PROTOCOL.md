@@ -86,7 +86,9 @@ align до байта, тело пакета         игровые пакеты
 
 | Пакет | Направление | Reliability/канал | Формат после ID |
 |---|---|---|---|
-| `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u8 nickLen, nick, f32 x,y,z` — создать куклу |
+| `PlayerStreamIn` (105) | С→К | ReliableOrdered/0 | `u16 id, u16 skin, u8 nickLen, nick, f32 x,y,z` — создать куклу (протокол v4) |
+| `Teleport` (132) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill`/респавн после смерти; клиент применяет, когда мир готов и пед жив |
+| `Death` (31) | К→С | ReliableOrdered/0 | без тела — клиент заметил HP<=0; сервер прячет куклу и шлёт Teleport на спавн, по первому синку с HP>0 игрок снова в стриме |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |
 | `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z, u8 health` — ретрансляция чужого OnFootSync (только зрителям в радиусе 250 м) |
 

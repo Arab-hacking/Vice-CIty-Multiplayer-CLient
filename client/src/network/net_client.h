@@ -42,6 +42,7 @@ public:
     // Удалённые игроки, о которых сообщил сервер (для пула кукол в игровом потоке).
     struct RemotePlayer {
         std::uint16_t id = 0;
+        std::uint16_t skin = 7;
         std::string nick;
         vc::Vector3 targetPosition{};
         bool hasPosition = false;
@@ -49,6 +50,17 @@ public:
         std::uint32_t syncCount = 0; // диагностика: сколько SyncUpdate пришло
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
+
+    // Телепорт локального игрока от сервера (спавн, /tp, /kill, смерть).
+    // Игровой поток забирает, когда мир готов и игрок жив.
+    struct LocalTeleport {
+        vc::Vector3 position{};
+        float heading = 0.0f;
+    };
+    [[nodiscard]] std::optional<LocalTeleport> TakePendingTeleport();
+
+    // Игровой поток заметил смерть (HP упало до 0) — сетевой поток шлёт Death.
+    void NotifyDeath();
 
 private:
     NetClient() = default;
@@ -80,6 +92,8 @@ private:
     std::optional<vc::Vector3> m_latestPosition;
     std::uint8_t m_latestHealth = 100;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
+    std::optional<LocalTeleport> m_pendingTeleport;
+    std::atomic<bool> m_deathPending{false};
 };
 
 } // namespace vc::network

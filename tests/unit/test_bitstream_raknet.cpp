@@ -204,10 +204,15 @@ void TestCodec() {
     CHECK(parsedSync && parsedSync->position.x == -378.5f &&
           parsedSync->position.y == -589.1f && parsedSync->health == 73);
 
-    const auto streamIn = vc::protocol::BuildPlayerStreamIn({3, "Ken", {1.0f, 2.0f, 3.0f}});
+    const auto streamIn =
+        vc::protocol::BuildPlayerStreamIn({3, 12, "Ken", {1.0f, 2.0f, 3.0f}});
     const auto parsedIn = vc::protocol::ParsePlayerStreamIn(streamIn);
-    CHECK(parsedIn && parsedIn->playerId == 3 && parsedIn->nick == "Ken" &&
-          parsedIn->position.z == 3.0f);
+    CHECK(parsedIn && parsedIn->playerId == 3 && parsedIn->skin == 12 &&
+          parsedIn->nick == "Ken" && parsedIn->position.z == 3.0f);
+
+    const auto tp = vc::protocol::BuildTeleport({{-378.5f, -589.1f, 25.6f}, 0.25f});
+    const auto parsedTp = vc::protocol::ParseTeleport(tp);
+    CHECK(parsedTp && parsedTp->position.y == -589.1f && parsedTp->heading == 0.25f);
 
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);

@@ -174,6 +174,7 @@ std::vector<std::uint8_t> BuildPlayerStreamIn(const PlayerStreamInData& data) {
     Writer w;
     w.U8(static_cast<std::uint8_t>(ServerRpc::PlayerStreamIn));
     w.U16(data.playerId);
+    w.U16(data.skin);
     w.Str8(data.nick);
     w.F32(data.position.x);
     w.F32(data.position.y);
@@ -186,6 +187,7 @@ std::optional<PlayerStreamInData> ParsePlayerStreamIn(const std::vector<std::uin
     if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::PlayerStreamIn))) return std::nullopt;
     PlayerStreamInData data;
     data.playerId = r.U16();
+    data.skin = r.U16();
     data.nick = r.Str8();
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
     if (!r.ok) return std::nullopt;
@@ -226,6 +228,26 @@ std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
     data.playerId = r.U16();
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
     data.health = r.U8();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildTeleport(const TeleportData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::Teleport));
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    w.F32(data.heading);
+    return w.out;
+}
+
+std::optional<TeleportData> ParseTeleport(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::Teleport))) return std::nullopt;
+    TeleportData data;
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    data.heading = r.F32();
     if (!r.ok) return std::nullopt;
     return data;
 }

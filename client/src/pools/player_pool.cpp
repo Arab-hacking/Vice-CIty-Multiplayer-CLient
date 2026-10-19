@@ -65,8 +65,9 @@ bool MovePuppetRaw(void* ped, float x, float y, float z, float heading, int move
         // CPlaceable::SetHeading принимает this = ped+8 (подобъект), НЕ ped!
         game::Resolve<SetHeadingFn>(game::revc::kCPlaceableSetHeading)(
             base + game::kPlaceableOffset, heading);
-        void* frameMatrix = *reinterpret_cast<void**>(base + 0x48); // CMatrix::pMatrix
-        if (frameMatrix) std::memcpy(frameMatrix, base + 0x08, 0x40);
+        void* frameMatrix =
+            *reinterpret_cast<void**>(base + game::kFrameMatrixPtrOffset);
+        if (frameMatrix) std::memcpy(frameMatrix, base + game::kEmbeddedMatrixOffset, 0x40);
         game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(ped);
         // Анимация ног: SetMoveState пишет поле, SetMoveAnim применяет анимацию
         // (сам проверяет, сменилось ли состояние — можно звать каждый кадр).
@@ -88,7 +89,6 @@ using ProcessControlFn = void (*)(void*);
 using DeletingDtorFn = void* (*)(void*, unsigned int);
 
 constexpr int kPedTypeCivMale = 4;   // ePedType из reVC
-constexpr int kPuppetModelId = 7;    // male01 в peds.ide Vice City
 constexpr int kModelWarmupFrames = 30;
 
 FILE* g_log = nullptr;
@@ -96,6 +96,7 @@ ProcessControlFn g_origProcessControl = nullptr;
 
 struct Puppet {
     void* ped = nullptr;
+    std::uint16_t skin = 7;
     std::string nick;
     vc::Vector3 current{};
     float heading = 0.0f;
@@ -104,8 +105,7 @@ struct Puppet {
 
 std::map<std::uint16_t, Puppet> g_puppets;
 std::unordered_set<const void*> g_puppetPeds;
-bool g_modelRequested = false;
-int g_modelWarmup = 0;
+std::map<int, int> g_modelWarmup; // modelId -> кадров загрузки прошло
 
 void Log(const char* text) {
     OutputDebugStringA(text);
@@ -120,37 +120,49 @@ void HookProcessControl(void* self) {
     g_origProcessControl(self);
 }
 
-bool EnsureModelLoading() {
-    if (!g_modelRequested) {
-        game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(kPuppetModelId, 0);
-        g_modelRequested = true;
+// True, когда модель скина запрошена и ей дали время загрузиться.
+bool EnsureModelReady(int modelId) {
+    auto [it, inserted] = g_modelWarmup.try_emplace(modelId, 0);
+    if (inserted) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "pool: запрашиваю модель %d\n", modelId);
+        Log(buf);
+        game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(modelId, 0);
         return false;
     }
-    if (g_modelWarmup < kModelWarmupFrames) {
+    if (it->second < kModelWarmupFrames) {
         game::Resolve<LoadAllModelsFn>(game::revc::kCStreamingLoadAllRequested)(false);
-        ++g_modelWarmup;
+        ++it->second;
         return false;
     }
     return true;
 }
 
-void* CreatePuppet(const vc::Vector3& position) {
+// POD SEH-создание педа: битый skin id не должен ронять игру.
+void* CreatePuppetRaw(void* pool, int skin, float x, float y, float z) {
+    VC_TRY {
+        void* memory = game::Resolve<PoolNewFn>(game::revc::kCPoolPedNew)(pool);
+        if (!memory) return nullptr;
+        void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
+            memory, kPedTypeCivMale, static_cast<unsigned int>(skin));
+        if (!ped) return nullptr;
+        MovePuppet(ped, vc::Vector3{x, y, z}, 0.0f, kMoveStill);
+        game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
+        return ped;
+    } VC_EXCEPT {
+        return nullptr;
+    }
+}
+
+void* CreatePuppet(const vc::Vector3& position, int skin) {
     auto** poolPtr = game::Resolve<void**>(game::revc::kCPoolsPedPool);
     void* pool = poolPtr ? *poolPtr : nullptr;
     if (!pool) {
         Log("pool: ms_pPedPool == nullptr (мир ещё не готов)\n");
         return nullptr;
     }
-    void* memory = game::Resolve<PoolNewFn>(game::revc::kCPoolPedNew)(pool);
-    if (!memory) {
-        Log("pool: CPool<CPed>::New() вернул nullptr (пул полон)\n");
-        return nullptr;
-    }
-    void* ped = game::Resolve<CivilianCtorFn>(game::revc::kCCivilianPedCtor)(
-        memory, kPedTypeCivMale, static_cast<unsigned int>(kPuppetModelId));
-    if (!ped) return nullptr;
-    MovePuppet(ped, position, 0.0f, kMoveStill);
-    game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(ped);
+    void* ped = CreatePuppetRaw(pool, skin, position.x, position.y, position.z);
+    if (!ped) Log("pool: создание педа не удалось (пул полон/битый скин/исключение)\n");
     return ped;
 }
 
@@ -218,19 +230,25 @@ void PlayerPool::Tick() {
     // Спавнить можно только когда локальный игрок уже в мире и модель загружена.
     auto findPed = game::Resolve<game::FindPlayerPedFn>(game::revc::kFindPlayerPed);
     if (!findPed || !findPed()) return;
-    const bool modelReady = EnsureModelLoading();
 
     for (const auto& remote : remotes) {
         if (!remote.hasPosition) continue;
         Puppet& puppet = g_puppets[remote.id];
         puppet.nick = remote.nick;
+        // Смена скина: пересоздаём куклу с новой моделью.
+        if (puppet.ped && puppet.skin != remote.skin) {
+            DestroyPuppet(puppet.ped);
+            g_puppetPeds.erase(puppet.ped);
+            puppet.ped = nullptr;
+        }
         if (!puppet.ped) {
             // Позиция (0,0,0) — игрок только подключился, sync ещё не приходил.
             const vc::Vector3& tp = remote.targetPosition;
             if (tp.x * tp.x + tp.y * tp.y + tp.z * tp.z < 0.01f) continue;
-            if (!modelReady) continue;
-            puppet.ped = CreatePuppet(remote.targetPosition);
+            if (!EnsureModelReady(remote.skin)) continue;
+            puppet.ped = CreatePuppet(remote.targetPosition, remote.skin);
             if (!puppet.ped) continue;
+            puppet.skin = remote.skin;
             puppet.current = remote.targetPosition;
             g_puppetPeds.insert(puppet.ped);
             Log(("pool: кукла создана для " + remote.nick + "\n").c_str());
