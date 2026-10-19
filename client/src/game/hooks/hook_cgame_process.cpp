@@ -21,6 +21,7 @@
 #include "../../core/seh_guard.h"
 #include "../../network/net_client.h"
 #include "../../pools/player_pool.h"
+#include "../../pools/vehicle_pool.h"
 #include "../../render/overlay.h"
 #include "../revc.h"
 #include "hook_cgame_process.h"
@@ -123,6 +124,7 @@ void OnFrameAfterOriginal() {
     }
     vc::network::NetClient::Instance().SetPlayerState(position, health);
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
+    vc::pools::VehiclePool::Instance().Tick(); // серверные машины
 
     // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).
     // Делается после оригинального CGame::Process: возвращаем педа в точку открытия чата.

@@ -152,6 +152,16 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         m_pendingTeleport = LocalTeleport{teleport->position, teleport->heading};
         Log("net: сервер телепортирует нас\n");
+    } else if (auto vehicleIn = vc::protocol::ParseVehicleStreamIn(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remoteVehicles[vehicleIn->vehicleId] = RemoteVehicle{
+            vehicleIn->vehicleId, vehicleIn->model, vehicleIn->position, vehicleIn->heading};
+        Log("net: stream-in машины id " + std::to_string(vehicleIn->vehicleId) +
+            " (модель " + std::to_string(vehicleIn->model) + ")\n");
+    } else if (auto vehicleOut = vc::protocol::ParseVehicleStreamOut(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remoteVehicles.erase(*vehicleOut);
+        Log("net: stream-out машины id " + std::to_string(*vehicleOut) + "\n");
     }
 }
 
@@ -169,6 +179,14 @@ std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
     std::vector<RemotePlayer> out;
     out.reserve(m_remotePlayers.size());
     for (const auto& [id, remote] : m_remotePlayers) out.push_back(remote);
+    return out;
+}
+
+std::vector<NetClient::RemoteVehicle> NetClient::RemoteVehicles() const {
+    std::lock_guard lock(m_mutex);
+    std::vector<RemoteVehicle> out;
+    out.reserve(m_remoteVehicles.size());
+    for (const auto& [id, remote] : m_remoteVehicles) out.push_back(remote);
     return out;
 }
 

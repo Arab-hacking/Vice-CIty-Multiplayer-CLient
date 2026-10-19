@@ -115,6 +115,7 @@ struct Session {
     std::uint16_t skin = 7;
     bool dead = false; // между Death-пакетом и первым синком с HP>0 (респавн)
     std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
+    std::set<std::uint16_t> streamedVehicles; // какие машины у него созданы
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
 
@@ -130,6 +131,18 @@ struct FakeBot {
     float phase = 0.0f;
 };
 std::vector<FakeBot> g_bots;
+
+// Серверная машина (команда /car). Шаг 1 этапа 4: статична, стримится по радиусу
+// как игроки. Синк водителя — следующий шаг.
+struct ServerVehicle {
+    std::uint16_t id = 0;
+    std::uint16_t model = 0;
+    std::uint16_t ownerId = 0;
+    vc::Vector3 position{};
+    float heading = 0.0f;
+};
+std::vector<ServerVehicle> g_vehicles;
+std::uint16_t g_nextVehicleId = 1;
 
 std::string KeyOf(const vc::net::Endpoint& ep) {
     return ep.ip + ":" + std::to_string(ep.port);
@@ -209,6 +222,31 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
                 Send(socket, session, vc::protocol::BuildPlayerStreamOut(id),
                      vc::net::Reliability::ReliableOrdered, 0);
         session.streamedIn = desired;
+
+        // Машины стримятся тем же радиусом.
+        std::set<std::uint16_t> desiredVehicles;
+        for (const auto& v : g_vehicles) {
+            const float dx = v.position.x - session.position.x;
+            const float dy = v.position.y - session.position.y;
+            const float dz = v.position.z - session.position.z;
+            if (dx * dx + dy * dy + dz * dz <= kStreamRadius * kStreamRadius)
+                desiredVehicles.insert(v.id);
+        }
+        for (std::uint16_t id : desiredVehicles) {
+            if (session.streamedVehicles.contains(id)) continue;
+            const auto it = std::find_if(g_vehicles.begin(), g_vehicles.end(),
+                                         [&](const ServerVehicle& v) { return v.id == id; });
+            if (it != g_vehicles.end())
+                Send(socket, session,
+                     vc::protocol::BuildVehicleStreamIn(
+                         {it->id, it->model, it->position, it->heading}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        }
+        for (std::uint16_t id : session.streamedVehicles)
+            if (!desiredVehicles.contains(id))
+                Send(socket, session, vc::protocol::BuildVehicleStreamOut(id),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        session.streamedVehicles = desiredVehicles;
     }
 }
 
@@ -234,6 +272,26 @@ void RemoveBotOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& ses
     }
 }
 
+// Убрать все машины владельца (выход с сервера, /delcar, повторный /car).
+void RemoveVehiclesOf(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
+                      std::uint16_t ownerId) {
+    std::vector<std::uint16_t> removed;
+    g_vehicles.erase(std::remove_if(g_vehicles.begin(), g_vehicles.end(),
+                                    [&](const ServerVehicle& v) {
+                                        if (v.ownerId == ownerId) removed.push_back(v.id);
+                                        return v.ownerId == ownerId;
+                                    }),
+                     g_vehicles.end());
+    for (std::uint16_t id : removed) {
+        std::printf("[server] Машина id %u (владелец %u) убрана\n", id, ownerId);
+        for (auto& [key, session] : sessions)
+            if (session.streamedVehicles.erase(id) > 0 && session.joined)
+                Send(socket, session, vc::protocol::BuildVehicleStreamOut(id),
+                     vc::net::Reliability::ReliableOrdered, 0);
+    }
+    if (!removed.empty()) std::fflush(stdout);
+}
+
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
 // Команды: /help, /bot, /unbot, /skin, /tp, /kill, /pos, /players.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
@@ -250,6 +308,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
 
     if (cmd == "/help") {
         reply("Команды: /bot - бот перед тобой, /unbot - убрать бота");
+        reply("/car [модель 130-236] - машина перед тобой, /delcar - убрать");
         reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
         reply("/kill - респавн, /pos - координаты, /players - онлайн");
     } else if (cmd == "/bot") {
@@ -332,6 +391,35 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                       session.position.x, session.position.y, session.position.z,
                       session.health);
         reply(buf);
+    } else if (cmd == "/car") {
+        if (!session.hasPosition) {
+            reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /car");
+            return;
+        }
+        int model = 141; // Infernus
+        ss >> model;
+        if (model < 130 || model > 236) {
+            reply("Использование: /car [модель 130-236], например /car 141 (Infernus)");
+            return;
+        }
+        RemoveVehiclesOf(socket, sessions, session.playerId); // одна машина на игрока
+        ServerVehicle vehicle;
+        vehicle.id = g_nextVehicleId++;
+        vehicle.model = static_cast<std::uint16_t>(model);
+        vehicle.ownerId = session.playerId;
+        vehicle.position = {session.position.x + session.moveDirX * 6.0f,
+                            session.position.y + session.moveDirY * 6.0f,
+                            session.position.z + 0.5f};
+        vehicle.heading = std::atan2(-session.moveDirX, session.moveDirY);
+        g_vehicles.push_back(vehicle);
+        StreamTick(socket, sessions); // машина появится сразу
+        reply("Машина (модель " + std::to_string(model) + ") перед тобой! /delcar - убрать");
+        std::printf("[server] Создана машина id %u (модель %d) для %s\n", vehicle.id, model,
+                    session.nick.c_str());
+        std::fflush(stdout);
+    } else if (cmd == "/delcar") {
+        RemoveVehiclesOf(socket, sessions, session.playerId);
+        reply("Машина убрана");
     } else if (cmd == "/players") {
         std::string list = "Онлайн:";
         for (const auto& e : BuildEntities(sessions))
@@ -360,6 +448,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             Broadcast(socket, sessions,
                       vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
             RemoveBotOf(socket, sessions, session.playerId);
+            RemoveVehiclesOf(socket, sessions, session.playerId);
             for (auto& [key, other] : sessions) other.streamedIn.erase(session.playerId);
         }
         return true;
@@ -614,6 +703,7 @@ int main(int argc, char** argv) {
                     Broadcast(socket, sessions,
                               vc::protocol::BuildPlayerStreamOut(session.playerId), &session);
                     RemoveBotOf(socket, sessions, session.playerId);
+                    RemoveVehiclesOf(socket, sessions, session.playerId);
                     const std::uint16_t goneId = session.playerId;
                     for (auto& [otherKey, other] : sessions) other.streamedIn.erase(goneId);
                 }

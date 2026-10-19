@@ -81,6 +81,23 @@ struct PlayerSyncUpdateData {
 [[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
     const std::vector<std::uint8_t>& payload);
 
+// VehicleStreamIn: [110][u16 vehicleId][u16 model][f32 x,y,z][f32 heading] —
+// серверная машина появилась в радиусе стриминга.
+struct VehicleStreamInData {
+    std::uint16_t vehicleId = 0;
+    std::uint16_t model = 0;
+    Vector3 position{};
+    float heading = 0.0f;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildVehicleStreamIn(const VehicleStreamInData& data);
+[[nodiscard]] std::optional<VehicleStreamInData> ParseVehicleStreamIn(
+    const std::vector<std::uint8_t>& payload);
+
+// VehicleStreamOut: [111][u16 vehicleId] — убрать машину.
+[[nodiscard]] std::vector<std::uint8_t> BuildVehicleStreamOut(std::uint16_t vehicleId);
+[[nodiscard]] std::optional<std::uint16_t> ParseVehicleStreamOut(
+    const std::vector<std::uint8_t>& payload);
+
 // Teleport: [132][f32 x,y,z][f32 heading] — сервер перемещает локального игрока
 // (спавн-пойнт при входе, /tp, /kill и респавн после смерти).
 struct TeleportData {

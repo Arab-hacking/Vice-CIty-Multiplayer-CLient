@@ -106,6 +106,9 @@ inline constexpr std::uintptr_t kCKeyboardStateClear = 0x0010A7C0u;
 // CPed* CPool<CPed>::New() — аллокация слота педа
 inline constexpr std::uintptr_t kCPoolPedNew = 0x001D7B60u;
 
+// CVehicle* CPool<CVehicle>::New() — аллокация слота транспорта
+inline constexpr std::uintptr_t kCPoolVehicleNew = 0x002CA290u;
+
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 

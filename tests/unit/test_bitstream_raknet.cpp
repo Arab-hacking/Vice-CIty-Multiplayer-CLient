@@ -214,6 +214,15 @@ void TestCodec() {
     const auto parsedTp = vc::protocol::ParseTeleport(tp);
     CHECK(parsedTp && parsedTp->position.y == -589.1f && parsedTp->heading == 0.25f);
 
+    const auto vehIn =
+        vc::protocol::BuildVehicleStreamIn({5, 141, {10.0f, -20.0f, 12.5f}, 1.5f});
+    const auto parsedVeh = vc::protocol::ParseVehicleStreamIn(vehIn);
+    CHECK(parsedVeh && parsedVeh->vehicleId == 5 && parsedVeh->model == 141 &&
+          parsedVeh->position.z == 12.5f && parsedVeh->heading == 1.5f);
+    const auto parsedVehOut =
+        vc::protocol::ParseVehicleStreamOut(vc::protocol::BuildVehicleStreamOut(5));
+    CHECK(parsedVehOut && *parsedVehOut == 5);
+
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);
 

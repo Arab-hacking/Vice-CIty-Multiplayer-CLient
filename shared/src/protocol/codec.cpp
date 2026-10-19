@@ -209,6 +209,47 @@ std::optional<std::uint16_t> ParsePlayerStreamOut(const std::vector<std::uint8_t
     return id;
 }
 
+std::vector<std::uint8_t> BuildVehicleStreamIn(const VehicleStreamInData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::CreateVehicle));
+    w.U16(data.vehicleId);
+    w.U16(data.model);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    w.F32(data.heading);
+    return w.out;
+}
+
+std::optional<VehicleStreamInData> ParseVehicleStreamIn(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::CreateVehicle))) return std::nullopt;
+    VehicleStreamInData data;
+    data.vehicleId = r.U16();
+    data.model = r.U16();
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    data.heading = r.F32();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildVehicleStreamOut(std::uint16_t vehicleId) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::DestroyVehicle));
+    w.U16(vehicleId);
+    return w.out;
+}
+
+std::optional<std::uint16_t> ParseVehicleStreamOut(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::DestroyVehicle))) return std::nullopt;
+    const std::uint16_t id = r.U16();
+    if (!r.ok) return std::nullopt;
+    return id;
+}
+
 std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data) {
     Writer w;
     w.U8(static_cast<std::uint8_t>(ServerRpc::PlayerSyncUpdate));

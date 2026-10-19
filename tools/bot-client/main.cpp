@@ -79,6 +79,11 @@ int main(int argc, char** argv) {
                 } else if (auto msg = vc::protocol::ParseServerMessage(payload)) {
                     std::printf("[server] %s\n", msg->c_str());
                     std::fflush(stdout);
+                } else if (auto vi = vc::protocol::ParseVehicleStreamIn(payload)) {
+                    std::printf("[bot] вижу машину id %u (модель %u) в (%.1f, %.1f, %.1f)\n",
+                                vi->vehicleId, vi->model, vi->position.x, vi->position.y,
+                                vi->position.z);
+                    std::fflush(stdout);
                 } else if (auto si = vc::protocol::ParsePlayerStreamIn(payload)) {
                     std::printf("[bot] вижу игрока %s (id %u) в (%.1f, %.1f, %.1f)\n",
                                 si->nick.c_str(), si->playerId, si->position.x,

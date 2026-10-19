@@ -51,6 +51,15 @@ public:
     };
     [[nodiscard]] std::vector<RemotePlayer> RemotePlayers() const;
 
+    // Серверные машины в стриме (игровой поток рисует их через VehiclePool).
+    struct RemoteVehicle {
+        std::uint16_t id = 0;
+        std::uint16_t model = 0;
+        vc::Vector3 position{};
+        float heading = 0.0f;
+    };
+    [[nodiscard]] std::vector<RemoteVehicle> RemoteVehicles() const;
+
     // Телепорт локального игрока от сервера (спавн, /tp, /kill, смерть).
     // Игровой поток забирает, когда мир готов и игрок жив.
     struct LocalTeleport {
@@ -92,6 +101,7 @@ private:
     std::optional<vc::Vector3> m_latestPosition;
     std::uint8_t m_latestHealth = 100;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
+    std::map<std::uint16_t, RemoteVehicle> m_remoteVehicles;
     std::optional<LocalTeleport> m_pendingTeleport;
     std::atomic<bool> m_deathPending{false};
 };
