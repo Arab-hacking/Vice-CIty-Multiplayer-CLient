@@ -71,6 +71,7 @@ private:
     std::atomic<bool> m_started{false};
 
     mutable std::mutex m_mutex; // защищает поля ниже
+    mutable std::mutex m_logMutex; // отдельный: Log() зовут и под m_mutex (был дедлок!)
     std::string m_status = "сеть выключена";
     std::vector<std::string> m_chatLines;
     std::vector<std::string> m_chatOutbox;

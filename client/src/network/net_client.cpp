@@ -22,7 +22,9 @@ NetClient& NetClient::Instance() {
 void NetClient::Log(const std::string& text) {
     OutputDebugStringA(text.c_str());
     if (m_log) {
-        std::lock_guard lock(m_mutex);
+        // НЕ m_mutex: Log() вызывают из обработчиков пакетов, уже держа m_mutex,
+        // а std::mutex нерекурсивный — это был дедлок «игра не запускается с сервером».
+        std::lock_guard lock(m_logMutex);
         std::fputs(text.c_str(), m_log);
         std::fflush(m_log);
     }
