@@ -17,6 +17,7 @@
 
 #include <MinHook.h>
 
+#include "../core/seh_guard.h"
 #include "../game/revc.h"
 #include "../network/net_client.h"
 #include "player_pool.h"
@@ -29,14 +30,32 @@ using CivilianCtorFn = void* (*)(void*, int, unsigned int);
 using TeleportFn = void (*)(void*, game::CVector);
 using UpdateRwFrameFn = void (*)(void*);
 
-// Перемещение куклы. Teleport пишет позицию в матрицу сущности (тень и
-// физика её видят), но мировая матрица Rw-клампа модели пересчитывается
-// только в UpdateRwFrame — без него МОДЕЛЬ остаётся стоять на месте
-// спавна, пока тень ездит по кругу (наблюдение владельца, 0.6.4).
+// Перемещение куклы (POD SEH-обёртка вокруг сырых оффсетов).
+// Факты из дизассемблера reVC.exe этой сборки:
+//  - CPed::Teleport пишет позицию только во ВСТРОЕННУЮ матрицу CPlaceable
+//    (CMatrix по смещению ped+0x08, pos = ped+0x38) — тень/физика её видят;
+//  - матрица Rw-фрейма клампа (по которой рисуется МОДЕЛЬ) — отдельная копия,
+//    указатель на неё CMatrix::pMatrix лежит по смещению ped+0x48
+//    (CMatrix::Attach при спавне копирует фрейм->встроенную, обратно — никто);
+//  - CEntity::UpdateRwFrame лишь помечает фрейм грязным (Frame::updateObjects),
+//    LTM пересчитается при рендере из матрицы ФРЕЙМА.
+// Поэтому: Teleport + копируем встроенную матрицу (64 байта) в матрицу фрейма
+// + UpdateRwFrame. Без копирования модель навсегда стоит на точке спавна.
+bool MovePuppetRaw(void* ped, float x, float y, float z) {
+    VC_TRY {
+        game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(ped, game::CVector{x, y, z});
+        auto* base = static_cast<char*>(ped);
+        void* frameMatrix = *reinterpret_cast<void**>(base + 0x48); // CMatrix::pMatrix
+        if (frameMatrix) std::memcpy(frameMatrix, base + 0x08, 0x40);
+        game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(ped);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 void MovePuppet(void* ped, const vc::Vector3& position) {
-    game::Resolve<TeleportFn>(game::revc::kCPedTeleport)(
-        ped, game::CVector{position.x, position.y, position.z});
-    game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(ped);
+    MovePuppetRaw(ped, position.x, position.y, position.z);
 }
 using WorldAddRemoveFn = void (*)(void*);
 using RequestModelFn = void (*)(int, int);
