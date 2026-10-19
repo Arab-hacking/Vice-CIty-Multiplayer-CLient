@@ -162,6 +162,15 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles.erase(*vehicleOut);
         Log("net: stream-out машины id " + std::to_string(*vehicleOut) + "\n");
+    } else if (auto pose = vc::protocol::ParseVehicleSyncUpdate(payload)) {
+        std::lock_guard lock(m_mutex);
+        auto it = m_remoteVehicles.find(pose->vehicleId);
+        if (it != m_remoteVehicles.end()) {
+            it->second.position = pose->position;
+            it->second.targetQuat = {pose->quatX, pose->quatY, pose->quatZ, pose->quatW};
+            it->second.hasPose = true;
+            ++it->second.syncCount;
+        }
     }
 }
 
@@ -173,6 +182,17 @@ std::optional<NetClient::LocalTeleport> NetClient::TakePendingTeleport() {
 }
 
 void NetClient::NotifyDeath() { m_deathPending.store(true); }
+
+void NetClient::SetLocalVehicleState(const std::optional<LocalVehicleState>& state) {
+    std::lock_guard lock(m_mutex);
+    m_localVehicle = state;
+}
+
+void NetClient::NotifyEnterVehicle(std::uint16_t vehicleId) {
+    m_vehicleEvent.store(static_cast<int>(vehicleId));
+}
+
+void NetClient::NotifyExitVehicle() { m_vehicleEvent.store(-1); }
 
 std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
     std::lock_guard lock(m_mutex);
@@ -232,6 +252,39 @@ void NetClient::ThreadMain() {
                 {static_cast<std::uint8_t>(vc::protocol::ClientPacket::Death)},
                 vc::net::Reliability::ReliableOrdered, 0, now);
             Log("net: отправлено уведомление о смерти\n");
+        }
+
+        // Посадка/выход из серверной машины + поза водителя 10 Гц.
+        if (m_state.load() == State::Connected) {
+            const int event = m_vehicleEvent.exchange(-2);
+            if (event >= 0) {
+                SendPayloadLockedPeer(
+                    vc::protocol::BuildEnterVehicle(
+                        {static_cast<std::uint16_t>(event), 0}),
+                    vc::net::Reliability::ReliableOrdered, 0, now);
+                Log("net: сели за руль машины id " + std::to_string(event) + "\n");
+            } else if (event == -1) {
+                SendPayloadLockedPeer(
+                    {static_cast<std::uint8_t>(vc::protocol::ClientPacket::ExitVehicle)},
+                    vc::net::Reliability::ReliableOrdered, 0, now);
+                Log("net: вышли из машины\n");
+            }
+            static std::uint64_t lastVehicleSyncMs = 0;
+            if (now - lastVehicleSyncMs >= 100) {
+                std::optional<LocalVehicleState> local;
+                {
+                    std::lock_guard lock(m_mutex);
+                    local = m_localVehicle;
+                }
+                if (local) {
+                    lastVehicleSyncMs = now;
+                    SendPayloadLockedPeer(
+                        vc::protocol::BuildInVehicleSync(
+                            {local->vehicleId, local->position, local->quat.x,
+                             local->quat.y, local->quat.z, local->quat.w}),
+                        vc::net::Reliability::UnreliableSequenced, 2, now);
+                }
+            }
         }
 
         // Исходящий чат из игрового потока.

@@ -51,5 +51,10 @@ inline constexpr std::uintptr_t kVehicleDoorLockOffset = 0x2D8;
 inline constexpr std::uintptr_t kStreamingInfoStride = 0x20;
 inline constexpr std::uintptr_t kStreamingLoadStateOffset = 0x10;
 inline constexpr std::uint8_t kStreamStateLoaded = 1;
+// CPhysical (из конструктора): m_vecMoveSpeed на +0x80, m_vecTurnSpeed на
+// +0x8C (по 12 байт). Зануляем оба при сетевой постановке машины, иначе
+// локальная физика утаскивает её от сетевой позы накопленной скоростью.
+inline constexpr std::uintptr_t kPhysicalMoveSpeedOffset = 0x80;
+inline constexpr std::uintptr_t kPhysicalTurnSpeedOffset = 0x8C;
 
 } // namespace vc::game

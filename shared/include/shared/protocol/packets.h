@@ -34,6 +34,7 @@ enum class ServerRpc : std::uint8_t {
     PlayerSyncUpdate   = 107,
     CreateVehicle      = 110,
     DestroyVehicle     = 111,
+    VehicleSyncUpdate  = 112,
     CreateObject       = 120,
     DestroyObject      = 121,
     ServerMessage      = 130,

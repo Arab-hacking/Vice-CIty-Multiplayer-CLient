@@ -50,6 +50,8 @@ struct SpawnedVehicle {
     std::uint16_t model = 0;
     vc::Vector3 spawnPos{};
     float spawnHeading = 0.0f;
+    vc::Vector3 current{};     // интерполированная позиция (сетевая поза)
+    vc::Quaternion currentQuat{};
     long long spawnTick = 0;
     int attempts = 0;                 // неудачных попыток создания
     long long nextRetryTick = 0;      // раньше этого кадра не повторять
@@ -176,6 +178,30 @@ void* LocalPlayerVehicleRaw() {
     }
 }
 
+// Применение сетевой позы: Remove + полная матрица (базис кватерниона) +
+// зануление скоростей CPhysical + копия в Rw-фрейм + Add. Без зануления
+// скоростей локальная физика утаскивает машину от позы между кадрами.
+bool ApplyVehiclePoseRaw(void* vehicle, const float rows[9], float x, float y, float z) {
+    VC_TRY {
+        game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldRemove)(vehicle);
+        auto* base = static_cast<char*>(vehicle);
+        float* m = reinterpret_cast<float*>(base + game::kEmbeddedMatrixOffset);
+        m[0] = rows[0]; m[1] = rows[1]; m[2] = rows[2];   // right   (+0x08)
+        m[4] = rows[3]; m[5] = rows[4]; m[6] = rows[5];   // forward (+0x18)
+        m[8] = rows[6]; m[9] = rows[7]; m[10] = rows[8];  // up      (+0x28)
+        m[12] = x; m[13] = y; m[14] = z;                  // pos     (+0x38)
+        std::memset(base + game::kPhysicalMoveSpeedOffset, 0, 24); // move+turn speed
+        void* frameMatrix =
+            *reinterpret_cast<void**>(base + game::kFrameMatrixPtrOffset);
+        if (frameMatrix) std::memcpy(frameMatrix, base + game::kEmbeddedMatrixOffset, 0x40);
+        game::Resolve<UpdateRwFrameFn>(game::revc::kCEntityUpdateRwFrame)(vehicle);
+        game::Resolve<WorldAddRemoveFn>(game::revc::kCWorldAdd)(vehicle);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 // POD SEH-создание машины. *failStage: 1 = пул полон (New вернул null),
 // 2 = конструктор упал/вернул null (модель не автомобиль: лодка/вертолёт/байк?).
 void* CreateVehicleRaw(void* pool, int model, float x, float y, float z, float heading,
@@ -270,6 +296,12 @@ VehiclePool& VehiclePool::Instance() {
 
 void VehiclePool::Init(FILE* log) { g_log = log; }
 
+std::uint16_t VehiclePool::ServerIdOf(const void* vehicle) const {
+    for (const auto& [id, spawned] : g_vehicles)
+        if (spawned.vehicle == vehicle && vehicle) return id;
+    return 0;
+}
+
 void VehiclePool::Tick() {
     ++g_tickCount;
     const auto remotes = vc::network::NetClient::Instance().RemoteVehicles();
@@ -335,6 +367,29 @@ void VehiclePool::Tick() {
                 game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(
                     remote.model, kStreamFlagsKeep);
             }
+            // Сетевая поза от водителя: интерполяция и постановка каждый кадр
+            // (как куклы педов). Машину локального игрока не трогаем — он сам
+            // источник позы.
+            if (remote.hasPose && spawned.vehicle != LocalPlayerVehicleRaw()) {
+                const float dx = remote.position.x - spawned.current.x;
+                const float dy = remote.position.y - spawned.current.y;
+                const float dz = remote.position.z - spawned.current.z;
+                if (dx * dx + dy * dy + dz * dz > 30.0f * 30.0f) {
+                    spawned.current = remote.position;
+                    spawned.currentQuat = remote.targetQuat;
+                } else {
+                    spawned.current.x += dx * 0.35f;
+                    spawned.current.y += dy * 0.35f;
+                    spawned.current.z += dz * 0.35f;
+                    spawned.currentQuat =
+                        vc::QuatNlerp(spawned.currentQuat, remote.targetQuat, 0.35f);
+                }
+                vc::Vector3 r, f, u;
+                vc::QuatToBasis(spawned.currentQuat, r, f, u);
+                const float rows[9] = {r.x, r.y, r.z, f.x, f.y, f.z, u.x, u.y, u.z};
+                ApplyVehiclePoseRaw(spawned.vehicle, rows, spawned.current.x,
+                                    spawned.current.y, spawned.current.z);
+            }
             // Телеметрия первых ~30 секунд + предупреждение о провале (БЕЗ
             // вмешательства в физику — перестановка в 0.6.10 довела до краша).
             if (g_tickCount % 60 == 0 && g_tickCount - spawned.spawnTick <= 1800) {
@@ -385,6 +440,12 @@ void VehiclePool::Tick() {
                 spawned.spawnPos = vc::Vector3{pos[0], pos[1], pos[2]};
         }
         spawned.spawnHeading = remote.heading;
+        spawned.current = spawned.spawnPos;
+        {
+            const float c = std::cos(remote.heading), s = std::sin(remote.heading);
+            spawned.currentQuat = vc::QuatFromBasis({c, s, 0.0f}, {-s, c, 0.0f},
+                                                    {0.0f, 0.0f, 1.0f});
+        }
         spawned.attempts = 0;
         spawned.fellReported = false;
         char buf[128];

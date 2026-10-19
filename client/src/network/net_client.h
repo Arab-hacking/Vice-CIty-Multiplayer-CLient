@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <shared/math/quaternion.h>
 #include <shared/math/vector3.h>
 #include <shared/net/peer.h>
 #include <shared/net/udp_socket.h>
@@ -57,8 +58,22 @@ public:
         std::uint16_t model = 0;
         vc::Vector3 position{};
         float heading = 0.0f;
+        vc::Quaternion targetQuat{}; // последняя поза от водителя (hasPose)
+        bool hasPose = false;
+        std::uint64_t syncCount = 0;
     };
     [[nodiscard]] std::vector<RemoteVehicle> RemoteVehicles() const;
+
+    // Локальный игрок за рулём серверной машины: поза уходит на сервер 10 Гц.
+    struct LocalVehicleState {
+        std::uint16_t vehicleId = 0;
+        vc::Vector3 position{};
+        vc::Quaternion quat{};
+    };
+    void SetLocalVehicleState(const std::optional<LocalVehicleState>& state);
+    // Края посадки/выхода (игровой поток заметил смену FindPlayerVehicle).
+    void NotifyEnterVehicle(std::uint16_t vehicleId);
+    void NotifyExitVehicle();
 
     // Телепорт локального игрока от сервера (спавн, /tp, /kill, смерть).
     // Игровой поток забирает, когда мир готов и игрок жив.
@@ -102,6 +117,8 @@ private:
     std::uint8_t m_latestHealth = 100;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
     std::map<std::uint16_t, RemoteVehicle> m_remoteVehicles;
+    std::optional<LocalVehicleState> m_localVehicle;
+    std::atomic<int> m_vehicleEvent{-2}; // -2 нет, -1 выход, >=0 вход (id машины)
     std::optional<LocalTeleport> m_pendingTeleport;
     std::atomic<bool> m_deathPending{false};
 };

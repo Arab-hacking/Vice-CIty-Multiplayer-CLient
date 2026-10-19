@@ -16,6 +16,10 @@ public:
     void Init(FILE* log);
     void Tick();
 
+    // Серверный id по указателю на игровую машину (0 — не серверная).
+    // Нужен хуку кадра, чтобы понять, что локальный игрок за рулём нашей машины.
+    [[nodiscard]] std::uint16_t ServerIdOf(const void* vehicle) const;
+
 private:
     VehiclePool() = default;
 };

@@ -293,4 +293,74 @@ std::optional<TeleportData> ParseTeleport(const std::vector<std::uint8_t>& paylo
     return data;
 }
 
+namespace {
+std::vector<std::uint8_t> BuildVehiclePose(std::uint8_t packetId,
+                                           const VehiclePoseData& data) {
+    Writer w;
+    w.U8(packetId);
+    w.U16(data.vehicleId);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    w.F32(data.quatX);
+    w.F32(data.quatY);
+    w.F32(data.quatZ);
+    w.F32(data.quatW);
+    return w.out;
+}
+
+std::optional<VehiclePoseData> ParseVehiclePose(std::uint8_t packetId,
+                                                const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(packetId)) return std::nullopt;
+    VehiclePoseData data;
+    data.vehicleId = r.U16();
+    data.position = Vector3{r.F32(), r.F32(), r.F32()};
+    data.quatX = r.F32();
+    data.quatY = r.F32();
+    data.quatZ = r.F32();
+    data.quatW = r.F32();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+} // namespace
+
+std::vector<std::uint8_t> BuildInVehicleSync(const VehiclePoseData& data) {
+    return BuildVehiclePose(static_cast<std::uint8_t>(ClientPacket::InVehicleSync), data);
+}
+
+std::optional<VehiclePoseData> ParseInVehicleSync(
+    const std::vector<std::uint8_t>& payload) {
+    return ParseVehiclePose(static_cast<std::uint8_t>(ClientPacket::InVehicleSync), payload);
+}
+
+std::vector<std::uint8_t> BuildVehicleSyncUpdate(const VehiclePoseData& data) {
+    return BuildVehiclePose(static_cast<std::uint8_t>(ServerRpc::VehicleSyncUpdate), data);
+}
+
+std::optional<VehiclePoseData> ParseVehicleSyncUpdate(
+    const std::vector<std::uint8_t>& payload) {
+    return ParseVehiclePose(static_cast<std::uint8_t>(ServerRpc::VehicleSyncUpdate), payload);
+}
+
+std::vector<std::uint8_t> BuildEnterVehicle(const EnterVehicleData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ClientPacket::EnterVehicle));
+    w.U16(data.vehicleId);
+    w.U8(data.seat);
+    return w.out;
+}
+
+std::optional<EnterVehicleData> ParseEnterVehicle(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ClientPacket::EnterVehicle)))
+        return std::nullopt;
+    EnterVehicleData data;
+    data.vehicleId = r.U16();
+    data.seat = r.U8();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
 } // namespace vc::protocol

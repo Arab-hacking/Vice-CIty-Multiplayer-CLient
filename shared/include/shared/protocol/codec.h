@@ -108,4 +108,30 @@ struct TeleportData {
 [[nodiscard]] std::optional<TeleportData> ParseTeleport(
     const std::vector<std::uint8_t>& payload);
 
+// Поза машины: InVehicleSync [11] клиент->сервер и VehicleSyncUpdate [112]
+// сервер->клиенты. Формат общий: [id][u16 vehicleId][f32 x,y,z][f32 qx,qy,qz,qw].
+struct VehiclePoseData {
+    std::uint16_t vehicleId = 0;
+    Vector3 position{};
+    float quatX = 0.0f;
+    float quatY = 0.0f;
+    float quatZ = 0.0f;
+    float quatW = 1.0f;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildInVehicleSync(const VehiclePoseData& data);
+[[nodiscard]] std::optional<VehiclePoseData> ParseInVehicleSync(
+    const std::vector<std::uint8_t>& payload);
+[[nodiscard]] std::vector<std::uint8_t> BuildVehicleSyncUpdate(const VehiclePoseData& data);
+[[nodiscard]] std::optional<VehiclePoseData> ParseVehicleSyncUpdate(
+    const std::vector<std::uint8_t>& payload);
+
+// EnterVehicle: [32][u16 vehicleId][u8 seat] (0 — водитель). ExitVehicle: [33].
+struct EnterVehicleData {
+    std::uint16_t vehicleId = 0;
+    std::uint8_t seat = 0;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildEnterVehicle(const EnterVehicleData& data);
+[[nodiscard]] std::optional<EnterVehicleData> ParseEnterVehicle(
+    const std::vector<std::uint8_t>& payload);
+
 } // namespace vc::protocol

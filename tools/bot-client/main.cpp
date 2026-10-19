@@ -4,6 +4,7 @@
 // Использование: vc-bot [--ip 127.0.0.1] [--port 7777] [--nick Bot] [--seconds 5]
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -30,6 +31,9 @@ int main(int argc, char** argv) {
     std::string nick = "TestBot";
     std::string say = "Привет! Я тестовый бот vc-bot.";
     int seconds = 5;
+    bool drive = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--drive") drive = true;
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--ip") server.ip = argv[++i];
@@ -58,6 +62,9 @@ int main(int argc, char** argv) {
 
     bool accepted = false;
     bool chatSent = false;
+    std::uint16_t driveVehicleId = 0;
+    bool enteredVehicle = false;
+    float drivePhase = 0.0f;
     std::uint16_t myId = 0;
     const std::uint64_t started = NowMs();
     std::uint64_t lastSync = 0;
@@ -80,10 +87,20 @@ int main(int argc, char** argv) {
                     std::printf("[server] %s\n", msg->c_str());
                     std::fflush(stdout);
                 } else if (auto vi = vc::protocol::ParseVehicleStreamIn(payload)) {
+                    driveVehicleId = vi->vehicleId;
                     std::printf("[bot] вижу машину id %u (модель %u) в (%.1f, %.1f, %.1f)\n",
                                 vi->vehicleId, vi->model, vi->position.x, vi->position.y,
                                 vi->position.z);
                     std::fflush(stdout);
+                } else if (auto vu = vc::protocol::ParseVehicleSyncUpdate(payload)) {
+                    static int vehPrinted = 0;
+                    if (vehPrinted < 6) {
+                        ++vehPrinted;
+                        std::printf("[bot] машина id %u едет (%.1f, %.1f, %.1f)\n",
+                                    vu->vehicleId, vu->position.x, vu->position.y,
+                                    vu->position.z);
+                        std::fflush(stdout);
+                    }
                 } else if (auto si = vc::protocol::ParsePlayerStreamIn(payload)) {
                     std::printf("[bot] вижу игрока %s (id %u) в (%.1f, %.1f, %.1f)\n",
                                 si->nick.c_str(), si->playerId, si->position.x,
@@ -121,6 +138,24 @@ int main(int argc, char** argv) {
             if (walkX < -395.0f) walkDir = 1.0f;
             send(vc::protocol::BuildOnFootSync({{walkX, -542.0f, 17.3f}, 100}),
                  vc::net::Reliability::UnreliableSequenced, 1);
+            // Режим --drive: садимся в увиденную машину и «едем» по кругу.
+            if (drive && chatSent && driveVehicleId != 0) {
+                if (!enteredVehicle) {
+                    enteredVehicle = true;
+                    send(vc::protocol::BuildEnterVehicle({driveVehicleId, 0}),
+                         vc::net::Reliability::ReliableOrdered, 0);
+                    std::printf("[bot] сел за руль машины id %u\n", driveVehicleId);
+                    std::fflush(stdout);
+                } else {
+                    drivePhase += 0.05f;
+                    const float cx = -390.0f + std::cos(drivePhase) * 12.0f;
+                    const float cy = -540.0f + std::sin(drivePhase) * 12.0f;
+                    send(vc::protocol::BuildInVehicleSync(
+                             {driveVehicleId, {cx, cy, 17.5f}, 0.0f, 0.0f,
+                              std::sin(drivePhase * 0.5f), std::cos(drivePhase * 0.5f)}),
+                         vc::net::Reliability::UnreliableSequenced, 2);
+                }
+            }
             if (NowMs() - started > static_cast<std::uint64_t>(seconds) * 1000) break;
         }
     }

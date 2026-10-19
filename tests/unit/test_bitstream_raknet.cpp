@@ -7,6 +7,7 @@
 #include <shared/net/offline.h>
 #include <shared/net/peer.h>
 #include <shared/net/raknet.h>
+#include <shared/math/quaternion.h>
 #include <shared/protocol/codec.h>
 #include <shared/version.h>
 
@@ -222,6 +223,30 @@ void TestCodec() {
     const auto parsedVehOut =
         vc::protocol::ParseVehicleStreamOut(vc::protocol::BuildVehicleStreamOut(5));
     CHECK(parsedVehOut && *parsedVehOut == 5);
+
+    const auto posePkt = vc::protocol::BuildInVehicleSync(
+        {7, {1.5f, -2.5f, 3.5f}, 0.1f, 0.2f, 0.3f, 0.9f});
+    const auto pose = vc::protocol::ParseInVehicleSync(posePkt);
+    CHECK(pose && pose->vehicleId == 7 && pose->position.y == -2.5f &&
+          pose->quatZ == 0.3f && pose->quatW == 0.9f);
+    const auto pose2 = vc::protocol::ParseVehicleSyncUpdate(
+        vc::protocol::BuildVehicleSyncUpdate({7, {1.5f, -2.5f, 3.5f}, 0.0f, 0.0f, 0.0f, 1.0f}));
+    CHECK(pose2 && pose2->vehicleId == 7 && pose2->quatW == 1.0f);
+    const auto enter = vc::protocol::ParseEnterVehicle(
+        vc::protocol::BuildEnterVehicle({42, 0}));
+    CHECK(enter && enter->vehicleId == 42 && enter->seat == 0);
+
+    // Кватернион: базис -> quat -> базис (round-trip) для поворота на 30° по Z.
+    {
+        const float a = 0.5235988f; // 30°
+        const float c = std::cos(a), s = std::sin(a);
+        const auto q = vc::QuatFromBasis({c, s, 0.0f}, {-s, c, 0.0f}, {0.0f, 0.0f, 1.0f});
+        vc::Vector3 r, f, u;
+        vc::QuatToBasis(q, r, f, u);
+        CHECK(std::fabs(r.x - c) < 1e-5f && std::fabs(r.y - s) < 1e-5f &&
+              std::fabs(f.x + s) < 1e-5f && std::fabs(f.y - c) < 1e-5f &&
+              std::fabs(u.z - 1.0f) < 1e-5f);
+    }
 
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);

@@ -46,6 +46,33 @@ bool SafeReadPedHealth(void* ped, float* out) {
     }
 }
 
+// Машина локального игрока (FindPlayerVehicle) под SEH, или null.
+void* SafeFindPlayerVehicle() {
+    VC_TRY {
+        auto find = Resolve<FindPlayerVehicleFn>(revc::kFindPlayerVehicle);
+        return find ? find() : nullptr;
+    } VC_EXCEPT {
+        return nullptr;
+    }
+}
+
+// Поза машины из встроенной матрицы: pos (+0x38) + базис (right/forward/up)
+// + dword флагов. POD SEH-обёртка.
+bool SafeReadVehiclePose(void* vehicle, float* pos, float* rows, unsigned int* flags) {
+    VC_TRY {
+        const auto* base = static_cast<const char*>(vehicle);
+        const float* m = reinterpret_cast<const float*>(base + kEmbeddedMatrixOffset);
+        rows[0] = m[0]; rows[1] = m[1]; rows[2] = m[2];
+        rows[3] = m[4]; rows[4] = m[5]; rows[5] = m[6];
+        rows[6] = m[8]; rows[7] = m[9]; rows[8] = m[10];
+        pos[0] = m[12]; pos[1] = m[13]; pos[2] = m[14];
+        *flags = *reinterpret_cast<const unsigned int*>(base + kEntityFlagsOffset);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 // Телепорт локального педа: Teleport + SetHeading (this=ped+8!) + перенос
 // встроенной матрицы в матрицу Rw-фрейма + UpdateRwFrame. POD SEH-обёртка.
 bool SafeTeleportLocalPed(void* ped, float x, float y, float z, float heading) {
@@ -125,6 +152,51 @@ void OnFrameAfterOriginal() {
     vc::network::NetClient::Instance().SetPlayerState(position, health);
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
+
+    // Локальный игрок за рулём СЕРВЕРНОЙ машины? Шлём позу + края посадки.
+    {
+        static std::uint16_t drivingId = 0;
+        void* myVehicle = SafeFindPlayerVehicle();
+        std::uint16_t serverId = 0;
+        bool isDriver = false;
+        float vpos[3] = {};
+        float vrows[9] = {};
+        if (myVehicle) {
+            serverId = vc::pools::VehiclePool::Instance().ServerIdOf(myVehicle);
+            unsigned int vflags = 0;
+            if (serverId != 0 && SafeReadVehiclePose(myVehicle, vpos, vrows, &vflags))
+                isDriver = ((vflags >> 3) & 0x1F) == 0; // STATUS_PLAYER
+        }
+        auto& net = vc::network::NetClient::Instance();
+        if (isDriver) {
+            if (serverId != drivingId) {
+                if (drivingId != 0) net.NotifyExitVehicle();
+                net.NotifyEnterVehicle(serverId);
+                drivingId = serverId;
+                if (g_log) {
+                    std::fprintf(g_log, "[frame %llu] за рулём серверной машины id %u\n",
+                                 static_cast<unsigned long long>(g_frame), serverId);
+                    std::fflush(g_log);
+                }
+            }
+            const vc::Quaternion q = vc::QuatFromBasis(
+                {vrows[0], vrows[1], vrows[2]}, {vrows[3], vrows[4], vrows[5]},
+                {vrows[6], vrows[7], vrows[8]});
+            net.SetLocalVehicleState(vc::network::NetClient::LocalVehicleState{
+                serverId, vc::Vector3{vpos[0], vpos[1], vpos[2]}, q});
+        } else {
+            if (drivingId != 0) {
+                net.NotifyExitVehicle();
+                drivingId = 0;
+                if (g_log) {
+                    std::fprintf(g_log, "[frame %llu] вышел из серверной машины\n",
+                                 static_cast<unsigned long long>(g_frame));
+                    std::fflush(g_log);
+                }
+            }
+            net.SetLocalVehicleState(std::nullopt);
+        }
+    }
 
     // Пока открыт ввод чата — держим педа на месте (игрок печатает, а не бегает на WASD).
     // Делается после оригинального CGame::Process: возвращаем педа в точку открытия чата.
