@@ -29,6 +29,8 @@ public:
 
     // iniPath: vc-client.ini рядом с DLL ([Server] IP/Port/Nick). Запускает поток сети.
     void Init(FILE* log, const std::string& iniPath);
+    // Путь к vc-client.ini (оверлей хранит там секцию [Chat]).
+    const std::string& IniPath() const { return m_iniPath; }
     // Best-effort из DllMain(DETACH): послать Disconnect и остановить поток.
     void ShutdownBestEffort();
 
@@ -124,6 +126,7 @@ private:
     void HandlePayload(const std::vector<std::uint8_t>& payload);
 
     FILE* m_log = nullptr;
+    std::string m_iniPath; // vc-client.ini рядом с DLL
     vc::net::UdpSocket m_socket;
     vc::net::ReliablePeer m_peer; // только из потока сети
     vc::net::Endpoint m_server{"127.0.0.1", 7777};

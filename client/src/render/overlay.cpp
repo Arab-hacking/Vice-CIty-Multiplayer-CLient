@@ -48,6 +48,14 @@ bool g_visible = true;
 bool g_chatOpen = false;
 bool g_chatFocusRequest = false;
 char g_chatBuffer[144] = {};
+// Настройки ленты чата (vc-client.ini, секция [Chat]).
+float g_chatPosX = 12.0f;
+float g_chatPosY = 12.0f;
+float g_chatW = 520.0f;
+float g_chatH = 220.0f;
+float g_chatBgAlpha = 0.55f;
+bool g_chatBorder = true;
+bool g_chatEdit = false; // режим настройки ленты (двигать/размер)
 HWND g_hwnd = nullptr;
 WNDPROC g_origWndProc = nullptr;
 
@@ -59,11 +67,43 @@ void Log(const char* text) {
     }
 }
 
+void LoadChatSettings() {
+    const std::string& path = vc::network::NetClient::Instance().IniPath();
+    if (path.empty()) return;
+    g_chatPosX = static_cast<float>(GetPrivateProfileIntA("Chat", "PosX", 12, path.c_str()));
+    g_chatPosY = static_cast<float>(GetPrivateProfileIntA("Chat", "PosY", 12, path.c_str()));
+    g_chatW = static_cast<float>(GetPrivateProfileIntA("Chat", "Width", 520, path.c_str()));
+    g_chatH = static_cast<float>(GetPrivateProfileIntA("Chat", "Height", 220, path.c_str()));
+    int alpha = GetPrivateProfileIntA("Chat", "BgAlpha", 55, path.c_str());
+    if (alpha < 0) alpha = 0;
+    if (alpha > 100) alpha = 100;
+    g_chatBgAlpha = static_cast<float>(alpha) / 100.0f;
+    g_chatBorder = GetPrivateProfileIntA("Chat", "Border", 1, path.c_str()) != 0;
+    Log("overlay: настройки чата загружены из ini\n");
+}
+
+void SaveChatSettings() {
+    const std::string& path = vc::network::NetClient::Instance().IniPath();
+    if (path.empty()) return;
+    char buf[32];
+    auto writeInt = [&](const char* key, int value) {
+        std::snprintf(buf, sizeof(buf), "%d", value);
+        WritePrivateProfileStringA("Chat", key, buf, path.c_str());
+    };
+    writeInt("PosX", static_cast<int>(g_chatPosX));
+    writeInt("PosY", static_cast<int>(g_chatPosY));
+    writeInt("Width", static_cast<int>(g_chatW));
+    writeInt("Height", static_cast<int>(g_chatH));
+    writeInt("BgAlpha", static_cast<int>(g_chatBgAlpha * 100.0f));
+    writeInt("Border", g_chatBorder ? 1 : 0);
+    Log("overlay: настройки чата сохранены в ini\n");
+}
+
 LRESULT CALLBACK HookWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (g_imguiReady) {
         // Пока открыт чат, клавиатуру игре не отдаём (DirectInput это не остановит —
         // движение дополнительно замораживает хук CGame::Process через Teleport).
-        if (g_chatOpen && (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
+        if ((g_chatOpen || g_chatEdit) && (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
                            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)) {
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
             return 0;
@@ -132,6 +172,75 @@ void DrawNametags() {
     }
 }
 
+// Лента чата: отдельное всегда видимое окно (раньше жила в F7-панели).
+// Позиция/размер/фон/рамка настраиваются (F7 -> "Настройка ленты") и
+// сохраняются в vc-client.ini [Chat].
+void DrawChatFeed() {
+    const auto lines = vc::network::NetClient::Instance().ChatLines();
+    if (lines.empty() && !g_chatEdit) return;
+
+    // Позиция/размер применяются каждый кадр из настроек; в режиме настройки
+    // окно можно таскать мышью и тянуть за края, а значения читаются обратно
+    // (поэтому Always не мешает перетаскиванию).
+    ImGui::SetNextWindowPos(ImVec2(g_chatPosX, g_chatPosY), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(g_chatW, g_chatH), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(g_chatBgAlpha);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, g_chatBorder ? 1.0f : 0.0f);
+    const ImGuiWindowFlags flags =
+        g_chatEdit ? ImGuiWindowFlags_NoCollapse
+                   : (ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoInputs);
+    if (ImGui::Begin("Чат##vcmp_chat_feed", nullptr, flags)) {
+        if (g_chatEdit) {
+            const ImVec2 pos = ImGui::GetWindowPos();
+            const ImVec2 size = ImGui::GetWindowSize();
+            g_chatPosX = pos.x;
+            g_chatPosY = pos.y;
+            g_chatW = size.x;
+            g_chatH = size.y;
+            // Стрелки - двигать, Ctrl+стрелки - размер, Shift - быстрее.
+            const float step = (ImGui::IsKeyDown(ImGuiKey_LeftShift) ||
+                                ImGui::IsKeyDown(ImGuiKey_RightShift))
+                                   ? 10.0f
+                                   : 2.0f;
+            const bool ctrl = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) ||
+                              ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+            auto clampf = [](float v, float lo, float hi) {
+                return v < lo ? lo : (v > hi ? hi : v);
+            };
+            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+                if (ctrl) g_chatW = clampf(g_chatW - step, 200.0f, 1600.0f);
+                else g_chatPosX = clampf(g_chatPosX - step, 0.0f, 4000.0f);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+                if (ctrl) g_chatW = clampf(g_chatW + step, 200.0f, 1600.0f);
+                else g_chatPosX = clampf(g_chatPosX + step, 0.0f, 4000.0f);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+                if (ctrl) g_chatH = clampf(g_chatH - step, 80.0f, 1200.0f);
+                else g_chatPosY = clampf(g_chatPosY - step, 0.0f, 4000.0f);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+                if (ctrl) g_chatH = clampf(g_chatH + step, 80.0f, 1200.0f);
+                else g_chatPosY = clampf(g_chatPosY + step, 0.0f, 4000.0f);
+            }
+        }
+        if (ImGui::BeginChild("##feed_lines", ImVec2(0, 0), false,
+                              ImGuiWindowFlags_NoScrollbar)) {
+            if (g_chatEdit)
+                ImGui::TextDisabled(
+                    "Настройка ленты: мышь или стрелки; Ctrl+стрелки - размер");
+            for (const std::string& line : lines)
+                ImGui::TextWrapped("%s", line.c_str());
+            ImGui::SetScrollHereY(1.0f); // свежие строки всегда снизу
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
 void DrawChatWindow() {
     // Открытие по T (когда не печатаем).
     if (!g_chatOpen && ImGui::IsKeyPressed(ImGuiKey_T, false)) {
@@ -147,13 +256,14 @@ void DrawChatWindow() {
         return;
     }
 
-    ImGui::SetNextWindowPos(ImVec2(12, 178), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(g_chatPosX, g_chatPosY + g_chatH + 4.0f),
+                            ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.85f);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize;
     if (ImGui::Begin("##vcmp_chat_input", nullptr, flags)) {
         ImGui::TextDisabled("Чат");
-        ImGui::SetNextItemWidth(420);
+        ImGui::SetNextItemWidth(g_chatW - 16.0f);
         if (g_chatFocusRequest) {
             ImGui::SetKeyboardFocusHere();
             g_chatFocusRequest = false;
@@ -204,6 +314,7 @@ bool InitImGuiOnce(IDirect3DDevice9* device) {
     }
     g_origWndProc = reinterpret_cast<WNDPROC>(
         SetWindowLongPtr(g_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&HookWndProc)));
+    LoadChatSettings();
     g_imguiReady = true;
     Log("overlay: ImGui инициализирован, панель активна (F7 — вкл/выкл)\n");
     return true;
@@ -254,15 +365,33 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
                 ImGui::TextColored(connected ? ImVec4(0.45f, 0.95f, 0.45f, 1.0f)
                                              : ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
                                    "Сеть: %s", net.StatusText().c_str());
-                const auto chatLines = net.ChatLines();
-                for (const std::string& line : chatLines)
-                    ImGui::TextWrapped("%s", line.c_str());
+                ImGui::Separator();
+                ImGui::Text("Лента чата");
+                const bool wasEdit = g_chatEdit;
+                ImGui::Checkbox("Настройка (двигать/размер)", &g_chatEdit);
+                if (g_chatEdit && !wasEdit) {
+                    for (int i = 0; i < 16 && ShowCursor(TRUE) < 0; ++i) {
+                    }
+                    ClipCursor(nullptr);
+                }
+                if (!g_chatEdit && wasEdit) {
+                    for (int i = 0; i < 16 && ShowCursor(FALSE) >= 0; ++i) {
+                    }
+                    SaveChatSettings();
+                }
+                ImGui::SliderFloat("Непрозрачность фона", &g_chatBgAlpha, 0.0f, 1.0f,
+                                   "%.2f");
+                if (ImGui::IsItemDeactivatedAfterEdit()) SaveChatSettings();
+                if (ImGui::Checkbox("Рамка окна ленты", &g_chatBorder)) SaveChatSettings();
+                ImGui::TextDisabled(
+                    "В настройке: мышь или стрелки; Ctrl+стрелки - размер");
                 ImGui::Separator();
                 ImGui::TextDisabled("T - чат, G - сесть/выйти пассажиром, F7 - панель");
             }
             ImGui::End();
         }
 
+        DrawChatFeed();
         DrawChatWindow();
         DrawNametags();
 

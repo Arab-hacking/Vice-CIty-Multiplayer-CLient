@@ -54,6 +54,7 @@ std::vector<std::string> NetClient::ChatLines() const {
 void NetClient::Init(FILE* log, const std::string& iniPath) {
     if (m_started.exchange(true)) return;
     m_log = log;
+    m_iniPath = iniPath;
 
     char ip[64] = "127.0.0.1";
     char nick[32] = "Player";
