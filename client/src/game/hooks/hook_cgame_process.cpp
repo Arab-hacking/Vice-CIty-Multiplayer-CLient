@@ -46,6 +46,56 @@ bool SafeReadPedHealth(void* ped, float* out) {
     }
 }
 
+// Тип оружия в руках педа (eWeaponType): слот m_currentWeapon (+0x654) ->
+// m_weapons[слот].m_eWeaponType (int32 в начале CWeapon, шаг 24). 0 при ошибке.
+int SafeReadCurrentWeapon(void* ped) {
+    VC_TRY {
+        const auto* base = static_cast<const char*>(ped);
+        const unsigned char slot =
+            *reinterpret_cast<const unsigned char*>(base + kPedCurrentWeaponOffset);
+        if (slot > 9) return 0;
+        const int type = *reinterpret_cast<const int*>(
+            base + kPedWeaponsOffset + slot * kWeaponStructSize);
+        return (type >= 0 && type <= 36) ? type : 0;
+    } VC_EXCEPT {
+        return 0;
+    }
+}
+
+// Выдать педу оружие игровыми функциями (модель в руку вешает сама игра) и
+// взять его в руки. Для type=0 — просто убрать оружие (кулаки).
+bool SafeGiveWeaponRaw(void* ped, int weaponType, unsigned int ammo) {
+    using GiveWeaponFn = int (*)(void*, int, unsigned int, bool);
+    using SetCurrentWeaponFn = void (*)(void*, int);
+    VC_TRY {
+        auto give = Resolve<GiveWeaponFn>(revc::kCPedGiveWeapon);
+        auto setCurrent = Resolve<SetCurrentWeaponFn>(revc::kCPedSetCurrentWeapon);
+        if (!setCurrent) return false;
+        if (weaponType != 0 && give) give(ped, weaponType, ammo, true);
+        setCurrent(ped, weaponType);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// Изменить здоровье педа на delta (урон, назначенный сервером).
+// false, если пед уже мёртв.
+bool SafeAdjustPedHealthRaw(void* ped, float delta, float* newHealth) {
+    VC_TRY {
+        float* hp = reinterpret_cast<float*>(static_cast<char*>(ped) + kPedHealthOffset);
+        if (*hp <= 0.0f) return false;
+        float value = *hp + delta;
+        if (value < 0.0f) value = 0.0f;
+        if (value > 1000.0f) value = 1000.0f;
+        *hp = value;
+        if (newHealth) *newHealth = value;
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 // Машина локального игрока (FindPlayerVehicle) под SEH, или null.
 void* SafeFindPlayerVehicle() {
     VC_TRY {
@@ -202,8 +252,37 @@ void OnFrameAfterOriginal() {
             const CVector p = findCoors();
             position = vc::Vector3{p.x, p.y, p.z};
         }
+        // Оружие от сервера (/gun): выдаём своему педу и берём в руки.
+        for (const auto& give :
+             vc::network::NetClient::Instance().TakePendingGiveWeapons()) {
+            if (SafeGiveWeaponRaw(ped, give.weapon, give.ammo)) {
+                vc::network::NetClient::Instance().AddLocalChatLine(
+                    "Получено оружие (id " + std::to_string(give.weapon) +
+                    ", патронов " + std::to_string(give.ammo) + ")");
+                if (g_log) {
+                    std::fprintf(g_log, "[frame %llu] выдано оружие id %u\n",
+                                 static_cast<unsigned long long>(g_frame), give.weapon);
+                    std::fflush(g_log);
+                }
+            }
+        }
+        // Урон от других игроков: вычитаем из здоровья своего педа (смерть
+        // следующим кадром подхватит обычный детект HP<=0).
+        for (const auto& dmg :
+             vc::network::NetClient::Instance().TakePendingDamage()) {
+            float newHp = 0.0f;
+            if (rawHealth > 0.0f &&
+                SafeAdjustPedHealthRaw(ped, -dmg.amount, &newHp)) {
+                vc::network::NetClient::Instance().AddLocalChatLine(
+                    "Игрок " + dmg.attackerNick + " нанёс вам " +
+                    std::to_string(static_cast<int>(dmg.amount)) + " урона (HP " +
+                    std::to_string(static_cast<int>(newHp)) + ")");
+            }
+        }
     }
-    vc::network::NetClient::Instance().SetPlayerState(position, health);
+    const int currentWeapon = ped ? SafeReadCurrentWeapon(ped) : 0;
+    vc::network::NetClient::Instance().SetPlayerState(
+        position, health, static_cast<std::uint8_t>(currentWeapon));
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
 
@@ -251,6 +330,7 @@ void OnFrameAfterOriginal() {
     {
         static std::uint16_t seatedId = 0;
         static int seatedSeat = -1;
+        static int vehHpBucket = -1; // сотня HP машины водителя (чат-лог урона)
         void* myVehicle = SafeFindPlayerVehicle();
         std::uint16_t serverId = 0;
         int seat = -1;
@@ -271,6 +351,11 @@ void OnFrameAfterOriginal() {
             net.NotifyEnterVehicle(serverId, static_cast<std::uint8_t>(seat));
             seatedId = serverId;
             seatedSeat = seat;
+            vehHpBucket = -1;
+            char seatBuf[72];
+            std::snprintf(seatBuf, sizeof(seatBuf), "Вы сели в машину id %u (место %d)",
+                          serverId, seat);
+            net.AddLocalChatLine(seatBuf);
             if (g_log) {
                 std::fprintf(g_log, "[frame %llu] в серверной машине id %u, место %d\n",
                              static_cast<unsigned long long>(g_frame), serverId, seat);
@@ -280,6 +365,8 @@ void OnFrameAfterOriginal() {
             net.NotifyExitVehicle();
             seatedId = 0;
             seatedSeat = -1;
+            vehHpBucket = -1;
+            net.AddLocalChatLine("Вы вышли из машины");
             if (g_log) {
                 std::fprintf(g_log, "[frame %llu] вышел из серверной машины\n",
                              static_cast<unsigned long long>(g_frame));
@@ -293,6 +380,11 @@ void OnFrameAfterOriginal() {
             float hp = vhealth;
             if (!(hp >= 0.0f)) hp = 0.0f; // NaN/отрицательное -> 0
             if (hp > 1000.0f) hp = 1000.0f;
+            const int bucket = static_cast<int>(hp / 100.0f);
+            if (vehHpBucket > bucket)
+                net.AddLocalChatLine("Ваша машина повреждена: HP " +
+                                     std::to_string(static_cast<int>(hp)));
+            vehHpBucket = bucket;
             net.SetLocalVehicleState(vc::network::NetClient::LocalVehicleState{
                 serverId, vc::Vector3{vpos[0], vpos[1], vpos[2]}, q,
                 static_cast<std::uint16_t>(hp)});

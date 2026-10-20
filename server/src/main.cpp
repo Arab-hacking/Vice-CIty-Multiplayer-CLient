@@ -112,6 +112,7 @@ struct Session {
     float moveDirX = 0.0f; // последнее направление движения (бот встаёт перед игроком)
     float moveDirY = 1.0f;
     std::uint8_t health = 100;
+    std::uint8_t weapon = 0; // eWeaponType в руках (протокол v9)
     std::uint16_t skin = 7;
     bool dead = false; // между Death-пакетом и первым синком с HP>0 (респавн)
     std::uint16_t inVehicleId = 0; // серверная машина игрока (0 — пешком)
@@ -135,6 +136,8 @@ struct FakeBot {
     float phase = 0.0f;
     bool driving = false;        // true: /dbot (круг на машине, радиус 12 м)
     std::uint16_t vehicleId = 0; // машина бота-водителя (ownerId у неё = bot.id)
+    float health = 100.0f; // HP фейкового бота (по нему можно стрелять — PlayerDamage)
+    std::uint8_t weapon = 0; // оружие в руках куклы (команда /gun владельца)
 };
 std::vector<FakeBot> g_bots;
 
@@ -363,7 +366,7 @@ void RemoveVehiclesOf(vc::net::UdpSocket& socket, std::map<std::string, Session>
 }
 
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
-// Команды: /help, /bot, /dbot, /unbot, /car, /delcar, /skin, /tp, /kill, /pos, /players.
+// Команды: /help, /bot, /dbot, /unbot, /car, /delcar, /skin, /gun, /tp, /kill, /pos, /players.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId, const std::string& text) {
     auto reply = [&](const std::string& msg) {
@@ -379,6 +382,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (cmd == "/help") {
         reply("Команды: /bot - пеший бот, /dbot [модель] - бот-водитель, /unbot - убрать");
         reply("/car [модель 130-236] - машина перед тобой, /delcar - убрать");
+        reply("/gun <id 1-36> [патроны] - оружие себе (и боту): 17 Colt, 25 MP5, 26 M4");
         reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
         reply("/kill - респавн, /pos - координаты, /players - онлайн");
     } else if (cmd == "/bot") {
@@ -560,6 +564,32 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         for (const auto& e : BuildEntities(sessions))
             list += " " + e.nick + " (#" + std::to_string(e.id) + ")";
         reply(list);
+    } else if (cmd == "/gun") {
+        int gunId = 0;
+        int gunAmmo = 500;
+        ss >> gunId;
+        if (!(ss >> gunAmmo)) gunAmmo = 500;
+        if (gunId < 1 || gunId > 36) {
+            reply("Использование: /gun <id 1-36> [патроны]. 17 Colt, 19 Shotgun, 25 MP5, 26 M4, 28 Sniper, 33 Minigun");
+            return;
+        }
+        if (gunAmmo < 1) gunAmmo = 1;
+        if (gunAmmo > 9999) gunAmmo = 9999;
+        Send(socket, session,
+             vc::protocol::BuildGiveWeapon({static_cast<std::uint8_t>(gunId),
+                                            static_cast<std::uint16_t>(gunAmmo)}),
+             vc::net::Reliability::ReliableOrdered, 0);
+        bool armedBot = false;
+        for (auto& bot : g_bots) {
+            if (bot.ownerId != session.playerId) continue;
+            bot.weapon = static_cast<std::uint8_t>(gunId);
+            armedBot = true;
+        }
+        reply("Оружие id " + std::to_string(gunId) + " выдано (патронов " +
+              std::to_string(gunAmmo) + ")" + (armedBot ? " Боту тоже." : ""));
+        std::printf("[server] Игрок %s получил оружие id %d (патронов %d)\n",
+                    session.nick.c_str(), gunId, gunAmmo);
+        std::fflush(stdout);
     } else {
         reply("Неизвестная команда. /help - список команд");
     }
@@ -742,6 +772,48 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         return false;
     }
 
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::PlayerDamage)) {
+        if (const auto dmg = vc::protocol::ParsePlayerDamage(payload)) {
+            if (dmg->amount > 0.0f && dmg->amount <= 1000.0f &&
+                dmg->victimId != session.playerId) {
+                bool delivered = false;
+                for (auto& [key, other] : sessions) {
+                    if (!other.joined || other.playerId != dmg->victimId) continue;
+                    Send(socket, other,
+                         vc::protocol::BuildTakeDamage(
+                             {session.playerId, dmg->amount, dmg->weapon}),
+                         vc::net::Reliability::ReliableOrdered, 0);
+                    std::printf("[server] %s нанёс %.0f урона игроку %s\n",
+                                session.nick.c_str(),
+                                static_cast<double>(dmg->amount), other.nick.c_str());
+                    std::fflush(stdout);
+                    delivered = true;
+                    break;
+                }
+                if (!delivered) {
+                    for (auto& bot : g_bots) {
+                        if (bot.id != dmg->victimId) continue;
+                        bot.health -= dmg->amount;
+                        std::printf("[server] %s нанёс %.0f урона боту %s (HP %.0f)\n",
+                                    session.nick.c_str(),
+                                    static_cast<double>(dmg->amount), bot.nick.c_str(),
+                                    static_cast<double>(bot.health < 0.0f ? 0.0f : bot.health));
+                        std::fflush(stdout);
+                        if (bot.health <= 0.0f) {
+                            const std::uint16_t ownerId = bot.ownerId;
+                            Broadcast(socket, sessions,
+                                      vc::protocol::BuildServerMessage(
+                                          "Бот " + bot.nick + " убит игроком " + session.nick));
+                            RemoveBotOf(socket, sessions, ownerId);
+                        }
+                        break; // ссылка bot после RemoveBotOf мертва
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::OnFootSync)) {
         if (const auto sync = vc::protocol::ParseOnFootSync(payload)) {
             const vc::Vector3& pos = sync->position;
@@ -756,6 +828,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             }
             session.position = pos;
             session.health = sync->health;
+            session.weapon = sync->weapon;
             session.hasPosition = true;
             if (session.dead && sync->health > 0) {
                 session.dead = false; // игра респавнила игрока — снова виден всем
@@ -767,7 +840,7 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
             // Ретрансляция зрителям в радиусе — из этих пакетов клиенты двигают кукол.
             SendSyncToViewers(
                 socket, sessions, session.playerId,
-                vc::protocol::BuildPlayerSyncUpdate({session.playerId, pos, sync->health}));
+                vc::protocol::BuildPlayerSyncUpdate({session.playerId, pos, sync->health, sync->weapon}));
             const float dx = pos.x - session.lastLoggedPosition.x;
             const float dy = pos.y - session.lastLoggedPosition.y;
             const float dz = pos.z - session.lastLoggedPosition.z;
@@ -957,9 +1030,13 @@ int main(int argc, char** argv) {
                 }
                 // Пеший синк шлём и водителю: позиция = позиция машины,
                 // сидящая кукла его игнорирует, стриминг/неймтег не теряются.
+                const std::uint8_t botHp =
+                    bot.health <= 0.0f ? 0
+                    : (bot.health >= 100.0f ? 100
+                                            : static_cast<std::uint8_t>(bot.health));
                 SendSyncToViewers(
                     socket, sessions, bot.id,
-                    vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position, 100}));
+                    vc::protocol::BuildPlayerSyncUpdate({bot.id, bot.position, botHp, bot.weapon}));
             }
         }
     }

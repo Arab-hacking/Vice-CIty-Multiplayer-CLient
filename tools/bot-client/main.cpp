@@ -34,11 +34,17 @@ int main(int argc, char** argv) {
     bool drive = false;
     bool damage = false;
     int driveSeat = 0;
+    int hitId = -1; // --hit <playerId> <amount>: доложить серверу об уроне
+    int hitAmount = 0;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--drive") drive = true;
         if (std::string(argv[i]) == "--damage") damage = true;
         if (std::string(argv[i]) == "--seat" && i + 1 < argc)
             driveSeat = std::atoi(argv[i + 1]);
+        if (std::string(argv[i]) == "--hit" && i + 2 < argc) {
+            hitId = std::atoi(argv[i + 1]);
+            hitAmount = std::atoi(argv[i + 2]);
+        }
     }
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
@@ -72,6 +78,8 @@ int main(int argc, char** argv) {
     bool enteredVehicle = false;
     float drivePhase = 0.0f;
     std::uint16_t myId = 0;
+    int myWeapon = 0; // оружие от сервера (/gun); шлём в OnFootSync
+    bool hitSent = false;
     const std::uint64_t started = NowMs();
     std::uint64_t lastSync = 0;
     // Ходим туда-сюда перед особняком Версетти (ровная площадка, z ~17.3):
@@ -126,6 +134,25 @@ int main(int argc, char** argv) {
                                     su->position.x, su->position.y, su->position.z);
                         std::fflush(stdout);
                     }
+                    static int lastSuHp = -1, lastSuWep = -1;
+                    if (static_cast<int>(su->health) != lastSuHp ||
+                        static_cast<int>(su->weapon) != lastSuWep) {
+                        lastSuHp = su->health;
+                        lastSuWep = su->weapon;
+                        std::printf("[bot] игрок id %u hp=%u оружие=%u\n", su->playerId,
+                                    su->health, su->weapon);
+                        std::fflush(stdout);
+                    }
+                } else if (auto give = vc::protocol::ParseGiveWeapon(payload)) {
+                    myWeapon = give->weapon;
+                    std::printf("[bot] дали оружие id %u (патронов %u)\n", give->weapon,
+                                give->ammo);
+                    std::fflush(stdout);
+                } else if (auto dmg = vc::protocol::ParseTakeDamage(payload)) {
+                    std::printf("[bot] по мне попали: -%.0f HP от игрока %u (оружие %u)\n",
+                                static_cast<double>(dmg->amount), dmg->attackerId,
+                                dmg->weapon);
+                    std::fflush(stdout);
                 } else if (auto rej = vc::protocol::ParseConnectionRejected(payload)) {
                     std::printf("vc-bot: ОТКАЗ: %s\n", rej->c_str());
                     return 1;
@@ -143,12 +170,23 @@ int main(int argc, char** argv) {
             send(vc::protocol::BuildChatMessage(say),
                  vc::net::Reliability::ReliableOrdered, 0);
         }
+        // --hit: один доклад об уроне после чата (тест цепочки PlayerDamage).
+        if (accepted && chatSent && hitId >= 0 && !hitSent &&
+            NowMs() - started >= 2500) {
+            hitSent = true;
+            send(vc::protocol::BuildPlayerDamage(
+                     {static_cast<std::uint16_t>(hitId), static_cast<float>(hitAmount), 26}),
+                 vc::net::Reliability::ReliableOrdered, 0);
+            std::printf("[bot] доложил урон: жертва %d, урон %d\n", hitId, hitAmount);
+            std::fflush(stdout);
+        }
         if (accepted && NowMs() - lastSync >= 100) {
             lastSync = NowMs();
             walkX += walkDir * 0.55f; // ~5.5 м/с — скорость бега
             if (walkX > -360.0f) walkDir = -1.0f;
             if (walkX < -395.0f) walkDir = 1.0f;
-            send(vc::protocol::BuildOnFootSync({{walkX, -542.0f, 17.3f}, 100}),
+            send(vc::protocol::BuildOnFootSync(
+                     {{walkX, -542.0f, 17.3f}, 100, static_cast<std::uint8_t>(myWeapon)}),
                  vc::net::Reliability::UnreliableSequenced, 1);
             // Режим --drive: садимся в увиденную машину и «едем» по кругу.
             if (drive && chatSent && driveVehicleId != 0) {

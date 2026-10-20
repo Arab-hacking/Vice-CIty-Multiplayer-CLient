@@ -13,6 +13,7 @@
 #include <shared/math/vector3.h>
 #include <shared/net/peer.h>
 #include <shared/net/udp_socket.h>
+#include <shared/protocol/codec.h>
 
 // Сетевой клиент внутри игры. Живёт в ОТДЕЛЬНОМ потоке: соединение не умирает,
 // когда игра на паузе, свёрнута или показывает загрузку (CGame::Process в это
@@ -32,10 +33,25 @@ public:
     void ShutdownBestEffort();
 
     // Вызывается из игрового потока каждый кадр.
-    void SetPlayerState(const std::optional<vc::Vector3>& position, std::uint8_t health);
+    void SetPlayerState(const std::optional<vc::Vector3>& position, std::uint8_t health,
+                        std::uint8_t weapon);
     void SendChat(const std::string& text);
     // Локальная служебная строка в окно чата (не уходит на сервер).
     void AddLocalChatLine(const std::string& text);
+
+    // Оружие от сервера (RPC GiveWeapon): игровой поток забирает и применяет
+    // к своему педу (CPed::GiveWeapon + SetCurrentWeapon).
+    [[nodiscard]] std::vector<vc::protocol::GiveWeaponData> TakePendingGiveWeapons();
+    // Урон от сервера (RPC TakeDamage): игровой поток вычитает из здоровья
+    // своего педа. Ник атакующего резолвится при приёме пакета.
+    struct PendingDamage {
+        std::string attackerNick;
+        float amount = 0.0f;
+        std::uint8_t weapon = 0;
+    };
+    [[nodiscard]] std::vector<PendingDamage> TakePendingDamage();
+    // Игровой поток докладывает о попадании по кукле (PlayerDamage на сервер).
+    void ReportDamage(std::uint16_t victimId, float amount);
 
     [[nodiscard]] State GetState() const { return m_state.load(); }
     [[nodiscard]] std::uint16_t PlayerId() const { return m_playerId.load(); }
@@ -50,6 +66,7 @@ public:
         vc::Vector3 targetPosition{};
         bool hasPosition = false;
         std::uint8_t health = 100;
+        std::uint8_t weapon = 0; // eWeaponType в руках (протокол v9)
         std::uint32_t syncCount = 0; // диагностика: сколько SyncUpdate пришло
         std::uint16_t inVehicleId = 0; // серверная машина, где сидит игрок (0 — пешком)
         std::uint8_t seat = 0;         // 0 — водитель, 1..3 — пассажир
@@ -124,6 +141,7 @@ private:
     std::vector<std::string> m_chatOutbox;
     std::optional<vc::Vector3> m_latestPosition;
     std::uint8_t m_latestHealth = 100;
+    std::uint8_t m_latestWeapon = 0;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
     std::map<std::uint16_t, RemoteVehicle> m_remoteVehicles;
     // playerId -> (vehicleId, seat) из VehicleOccupant (может прийти раньше
@@ -132,6 +150,9 @@ private:
     std::optional<LocalVehicleState> m_localVehicle;
     std::atomic<int> m_vehicleEvent{-2}; // -2 нет, -1 выход, >=0: id | (seat << 16)
     std::optional<LocalTeleport> m_pendingTeleport;
+    std::vector<vc::protocol::GiveWeaponData> m_pendingGiveWeapons;
+    std::vector<PendingDamage> m_pendingDamage;
+    std::vector<vc::protocol::PlayerDamageData> m_damageOutbox;
     std::atomic<bool> m_deathPending{false};
 };
 

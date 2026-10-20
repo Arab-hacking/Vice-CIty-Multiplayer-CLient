@@ -121,6 +121,12 @@ inline constexpr std::uintptr_t kCPedSetObjective = 0x00200AF0u;
 // void CPed::WarpPedIntoCar(CVehicle*) — мгновенная посадка педа в машину (как скриптовый WARP_CHAR_INTO_CAR)
 inline constexpr std::uintptr_t kCPedWarpPedIntoCar = 0x001ED420u;
 
+// int CPed::GiveWeapon(eWeaponType, uint32, bool) — выдача оружия педу (модель в руку вешает сама игра)
+inline constexpr std::uintptr_t kCPedGiveWeapon = 0x001D64D0u;
+
+// void CPed::SetCurrentWeapon(eWeaponType) — взять оружие в руки
+inline constexpr std::uintptr_t kCPedSetCurrentWeapon = 0x001E3C80u;
+
 // void CPed::ProcessControl() — хук отключает ИИ сетевых кукол
 inline constexpr std::uintptr_t kCPedProcessControl = 0x001DCA20u;
 

@@ -46,10 +46,12 @@ struct ConnectionAcceptedData {
 [[nodiscard]] std::optional<std::string> ParseChatMessage(
     const std::vector<std::uint8_t>& payload);
 
-// OnFootSync: [10][f32 x,y,z][u8 health] — позиция и здоровье локального игрока.
+// OnFootSync: [10][f32 x,y,z][u8 health][u8 weapon] — позиция, здоровье и
+// оружие в руках локального игрока (weapon — протокол v9, eWeaponType).
 struct OnFootSyncData {
     Vector3 position{};
     std::uint8_t health = 100;
+    std::uint8_t weapon = 0; // протокол v9
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildOnFootSync(const OnFootSyncData& data);
 [[nodiscard]] std::optional<OnFootSyncData> ParseOnFootSync(
@@ -71,14 +73,47 @@ struct PlayerStreamInData {
 [[nodiscard]] std::optional<std::uint16_t> ParsePlayerStreamOut(
     const std::vector<std::uint8_t>& payload);
 
-// PlayerSyncUpdate: [107][u16 id][f32 x,y,z][u8 health] — позиция и HP чужого игрока.
+// PlayerSyncUpdate: [107][u16 id][f32 x,y,z][u8 health][u8 weapon] — позиция,
+// HP и оружие в руках чужого игрока (weapon — протокол v9).
 struct PlayerSyncUpdateData {
     std::uint16_t playerId = 0;
     Vector3 position{};
     std::uint8_t health = 100;
+    std::uint8_t weapon = 0; // протокол v9
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data);
 [[nodiscard]] std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
+    const std::vector<std::uint8_t>& payload);
+
+// GiveWeapon: [114][u8 weapon][u16 ammo] — сервер выдаёт оружие (eWeaponType).
+struct GiveWeaponData {
+    std::uint8_t weapon = 0;
+    std::uint16_t ammo = 0;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildGiveWeapon(const GiveWeaponData& data);
+[[nodiscard]] std::optional<GiveWeaponData> ParseGiveWeapon(
+    const std::vector<std::uint8_t>& payload);
+
+// PlayerDamage: [35][u16 victimId][f32 amount][u8 weapon] — стрелок докладывает
+// серверу о попадании по кукле (детект по падению HP педа-куклы).
+struct PlayerDamageData {
+    std::uint16_t victimId = 0;
+    float amount = 0.0f;
+    std::uint8_t weapon = 0;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildPlayerDamage(const PlayerDamageData& data);
+[[nodiscard]] std::optional<PlayerDamageData> ParsePlayerDamage(
+    const std::vector<std::uint8_t>& payload);
+
+// TakeDamage: [115][u16 attackerId][f32 amount][u8 weapon] — сервер говорит
+// жертве убавить здоровье своего педа.
+struct TakeDamageData {
+    std::uint16_t attackerId = 0;
+    float amount = 0.0f;
+    std::uint8_t weapon = 0;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildTakeDamage(const TakeDamageData& data);
+[[nodiscard]] std::optional<TakeDamageData> ParseTakeDamage(
     const std::vector<std::uint8_t>& payload);
 
 // VehicleStreamIn: [110][u16 vehicleId][u16 model][f32 x,y,z][f32 heading] —

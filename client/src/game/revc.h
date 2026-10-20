@@ -34,6 +34,14 @@ using FindPlayerVehicleFn = void* (*)();
 inline constexpr std::uintptr_t kPlaceableOffset = 0x08;
 inline constexpr std::uintptr_t kPedHealthOffset = 0x454;
 inline constexpr std::uintptr_t kPedArmourOffset = 0x458;
+// CPed::m_weapons[10] = ped+0x558 (CWeapon по 24 байта; m_eWeaponType —
+// int32 в начале), m_currentWeapon (СЛОТ текущего оружия, байт) = ped+0x654.
+// Из дизасма GiveWeapon/SetCurrentWeapon этой сборки: они считают
+// [ped + (slot+0x39)*24] -> база массива 0x558 = 0x39*24; счёт по полям
+// Ped.h сходится: 0x558 + 10*24 + 12 (stored/delayed/delayedAmmo) = 0x654.
+inline constexpr std::uintptr_t kPedWeaponsOffset = 0x558;
+inline constexpr std::uintptr_t kPedCurrentWeaponOffset = 0x654;
+inline constexpr std::uintptr_t kWeaponStructSize = 24;
 // Встроенная матрица CPlaceable (pos на ped+0x38) и указатель на матрицу
 // Rw-фрейма (CMatrix::pMatrix) — модель рисуется по второй, Teleport пишет
 // только первую, поэтому после перемещения копируем 0x40 байт первой во вторую.

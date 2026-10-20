@@ -71,9 +71,10 @@ align до байта, тело пакета         игровые пакеты
 | `ConnectionRejected` (104) | С→К | ReliableOrdered/0 | `u16 len, reason` |
 | `ServerMessage` (130) | С→К | ReliableOrdered/0 | `u16 len, text` |
 | `ChatMessage` (20) | К→С | ReliableOrdered/0 | `u16 len, text` (сервер ретранслирует как ServerMessage всем) |
-| `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x,y,z, u8 health` (протокол v3) |
+| `OnFootSync` (10) | К→С | UnreliableSequenced/1, 10 Гц | `f32 x,y,z, u8 health, u8 weapon` (health — v3; weapon — eWeaponType оружия в руках, v9) |
 | `KeepAlive` (22) | К→С | Unreliable/0, раз в 3 с без спавна | пустой |
 | `Disconnect` (34) | К→С | Unreliable/0 | пустой — сервер сразу закрывает сессию (иначе по таймауту 15 с) |
+| `PlayerDamage` (35) | К→С | ReliableOrdered/0 | `u16 victimId, f32 amount, u8 weapon` — клиент стрелка заметил падение HP педа-куклы и докладывает серверу; сервер шлёт жертве `TakeDamage` (v9) |
 
 Сеть клиента работает в отдельном потоке: пауза/Alt-Tab/загрузка игры соединение не рвут.
 Игровой поток только публикует свежую позицию (`SetPlayerPosition`).
@@ -94,10 +95,12 @@ align до байта, тело пакета         игровые пакеты
 | `InVehicleSync` (11) | К→С | UnreliableSequenced/2 | `u16 vehicleId, f32 x,y,z, f32 qx,qy,qz,qw, u16 health` — поза и HP машины от водителя, 10 Гц (health — протокол v8) |
 | `VehicleSyncUpdate` (112) | С→К | UnreliableSequenced/2 | тот же формат — ретрансляция зрителям машины |
 | `VehicleOccupant` (113) | С→К | ReliableOrdered/0 | `u16 vehicleId, u16 playerId, u8 seat` (0 — водитель, 1–3 — пассажиры, 255 — покинул машину); клиенты сажают куклу игрока в машину (протокол v7) |
+| `GiveWeapon` (114) | С→К | ReliableOrdered/0 | `u8 weapon, u16 ammo` — сервер выдаёт оружие (команда `/gun <id> [патроны]`); клиент применяет через `CPed::GiveWeapon`+`SetCurrentWeapon` (v9) |
+| `TakeDamage` (115) | С→К | ReliableOrdered/0 | `u16 attackerId, f32 amount, u8 weapon` — сервер велит жертве вычесть HP (v9) |
 | `Teleport` (132) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill`/респавн после смерти; клиент применяет, когда мир готов и пед жив |
 | `Death` (31) | К→С | ReliableOrdered/0 | без тела — клиент заметил HP<=0; сервер прячет куклу и шлёт Teleport на спавн, по первому синку с HP>0 игрок снова в стриме |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |
-| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z, u8 health` — ретрансляция чужого OnFootSync (только зрителям в радиусе 250 м) |
+| `PlayerSyncUpdate` (107) | С→К | UnreliableSequenced/1 | `u16 id, f32 x,y,z, u8 health, u8 weapon` — ретрансляция чужого OnFootSync (только зрителям в радиусе 250 м); weapon — v9 |
 
 Сервер шлёт StreamIn новичку обо всех онлайн и всем о новичке; стриминга по радиусу
 пока нет (все видят всех). Клиент спавнит `CCivilianPed` (модель 7) через пул игры,
@@ -106,7 +109,7 @@ align до байта, тело пакета         игровые пакеты
 
 ## Дальше по протоколу
 
-1. Расширенный OnFootSync: скорость, поворот (heading), HP, оружие, анимация бега.
+1. Расширенный OnFootSync: скорость, поворот (heading), анимация бега (HP — v3, оружие — v9, уже есть).
 2. Стриминг по радиусу (~200 м) вместо «все видят всех».
 3. Пароль сервера в ConnectionRequest.
 

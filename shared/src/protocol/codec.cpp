@@ -157,6 +157,7 @@ std::vector<std::uint8_t> BuildOnFootSync(const OnFootSyncData& data) {
     w.F32(data.position.y);
     w.F32(data.position.z);
     w.U8(data.health);
+    w.U8(data.weapon); // протокол v9
     return w.out;
 }
 
@@ -166,6 +167,7 @@ std::optional<OnFootSyncData> ParseOnFootSync(const std::vector<std::uint8_t>& p
     OnFootSyncData data;
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
     data.health = r.U8();
+    data.weapon = r.U8(); // протокол v9
     if (!r.ok) return std::nullopt;
     return data;
 }
@@ -260,6 +262,7 @@ std::vector<std::uint8_t> BuildPlayerSyncUpdate(const PlayerSyncUpdateData& data
     w.F32(data.position.y);
     w.F32(data.position.z);
     w.U8(data.health);
+    w.U8(data.weapon); // протокол v9
     return w.out;
 }
 
@@ -271,6 +274,65 @@ std::optional<PlayerSyncUpdateData> ParsePlayerSyncUpdate(
     data.playerId = r.U16();
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
     data.health = r.U8();
+    data.weapon = r.U8(); // протокол v9
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildGiveWeapon(const GiveWeaponData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::GiveWeapon));
+    w.U8(data.weapon);
+    w.U16(data.ammo);
+    return w.out;
+}
+
+std::optional<GiveWeaponData> ParseGiveWeapon(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::GiveWeapon))) return std::nullopt;
+    GiveWeaponData data;
+    data.weapon = r.U8();
+    data.ammo = r.U16();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildPlayerDamage(const PlayerDamageData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ClientPacket::PlayerDamage));
+    w.U16(data.victimId);
+    w.F32(data.amount);
+    w.U8(data.weapon);
+    return w.out;
+}
+
+std::optional<PlayerDamageData> ParsePlayerDamage(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ClientPacket::PlayerDamage))) return std::nullopt;
+    PlayerDamageData data;
+    data.victimId = r.U16();
+    data.amount = r.F32();
+    data.weapon = r.U8();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildTakeDamage(const TakeDamageData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::TakeDamage));
+    w.U16(data.attackerId);
+    w.F32(data.amount);
+    w.U8(data.weapon);
+    return w.out;
+}
+
+std::optional<TakeDamageData> ParseTakeDamage(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::TakeDamage))) return std::nullopt;
+    TakeDamageData data;
+    data.attackerId = r.U16();
+    data.amount = r.F32();
+    data.weapon = r.U8();
     if (!r.ok) return std::nullopt;
     return data;
 }

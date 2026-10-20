@@ -200,10 +200,11 @@ void TestCodec() {
     const auto parsedMsg = vc::protocol::ParseServerMessage(msg);
     CHECK(parsedMsg && *parsedMsg == "Привет, Вайс-Сити!");
 
-    const auto sync = vc::protocol::BuildOnFootSync({{-378.5f, -589.1f, 25.32f}, 73});
+    const auto sync = vc::protocol::BuildOnFootSync({{-378.5f, -589.1f, 25.32f}, 73, 26});
     const auto parsedSync = vc::protocol::ParseOnFootSync(sync);
     CHECK(parsedSync && parsedSync->position.x == -378.5f &&
-          parsedSync->position.y == -589.1f && parsedSync->health == 73);
+          parsedSync->position.y == -589.1f && parsedSync->health == 73 &&
+          parsedSync->weapon == 26);
 
     const auto streamIn =
         vc::protocol::BuildPlayerStreamIn({3, 12, "Ken", {1.0f, 2.0f, 3.0f}});
@@ -256,10 +257,23 @@ void TestCodec() {
     const auto streamOut = vc::protocol::BuildPlayerStreamOut(3);
     CHECK(vc::protocol::ParsePlayerStreamOut(streamOut) == 3);
 
-    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}, 42});
+    const auto upd = vc::protocol::BuildPlayerSyncUpdate({3, {-10.5f, 20.25f, 7.0f}, 42, 25});
     const auto parsedUpd = vc::protocol::ParsePlayerSyncUpdate(upd);
     CHECK(parsedUpd && parsedUpd->playerId == 3 && parsedUpd->position.x == -10.5f &&
-          parsedUpd->health == 42);
+          parsedUpd->health == 42 && parsedUpd->weapon == 25);
+
+    // Оружие и урон (протокол v9).
+    const auto gw = vc::protocol::BuildGiveWeapon({26, 500});
+    const auto parsedGw = vc::protocol::ParseGiveWeapon(gw);
+    CHECK(parsedGw && parsedGw->weapon == 26 && parsedGw->ammo == 500);
+    const auto pd = vc::protocol::BuildPlayerDamage({7, 33.5f, 25});
+    const auto parsedPd = vc::protocol::ParsePlayerDamage(pd);
+    CHECK(parsedPd && parsedPd->victimId == 7 && parsedPd->amount == 33.5f &&
+          parsedPd->weapon == 25);
+    const auto td = vc::protocol::BuildTakeDamage({3, 12.0f, 17});
+    const auto parsedTd = vc::protocol::ParseTakeDamage(td);
+    CHECK(parsedTd && parsedTd->attackerId == 3 && parsedTd->amount == 12.0f &&
+          parsedTd->weapon == 17);
 }
 
 } // namespace

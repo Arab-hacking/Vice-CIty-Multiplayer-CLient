@@ -435,9 +435,22 @@ void VehiclePool::Tick() {
             // водителя не трогаем: он сам источник HP.
             if (!LocalPlayerDrivingRaw(spawned.vehicle)) {
                 const float hp = static_cast<float>(remote.health);
+                const float prev = spawned.appliedHealth;
                 if (std::fabs(hp - spawned.appliedHealth) > 0.5f &&
-                    ApplyVehicleHealthRaw(spawned.vehicle, hp))
+                    ApplyVehicleHealthRaw(spawned.vehicle, hp)) {
                     spawned.appliedHealth = hp;
+                    // События чужой машины — в чат (горение/взрыв видны в ленте).
+                    char buf[72];
+                    if (prev > 0.0f && hp == 0.0f) {
+                        std::snprintf(buf, sizeof(buf), "Машина id %u взорвалась!",
+                                      remote.id);
+                        vc::network::NetClient::Instance().AddLocalChatLine(buf);
+                    } else if (prev >= 250.0f && hp < 250.0f) {
+                        std::snprintf(buf, sizeof(buf), "Машина id %u горит!",
+                                      remote.id);
+                        vc::network::NetClient::Instance().AddLocalChatLine(buf);
+                    }
+                }
             }
             // Сетевая поза от водителя: интерполяция и постановка каждый кадр
             // (как куклы педов). Пропускаем только если локальный игрок сам

@@ -93,10 +93,11 @@ void NetClient::ShutdownBestEffort() {
 }
 
 void NetClient::SetPlayerState(const std::optional<vc::Vector3>& position,
-                               std::uint8_t health) {
+                               std::uint8_t health, std::uint8_t weapon) {
     std::lock_guard lock(m_mutex);
     m_latestPosition = position;
     m_latestHealth = health;
+    m_latestWeapon = weapon;
 }
 
 void NetClient::SendChat(const std::string& text) {
@@ -149,12 +150,26 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
             it->second.targetPosition = update->position;
             it->second.hasPosition = true;
             it->second.health = update->health;
+            it->second.weapon = update->weapon;
             ++it->second.syncCount;
         }
     } else if (auto teleport = vc::protocol::ParseTeleport(payload)) {
         std::lock_guard lock(m_mutex);
         m_pendingTeleport = LocalTeleport{teleport->position, teleport->heading};
         Log("net: сервер телепортирует нас\n");
+    } else if (auto give = vc::protocol::ParseGiveWeapon(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_pendingGiveWeapons.push_back(*give);
+        Log("net: сервер выдал оружие id " + std::to_string(give->weapon) +
+            " (патронов " + std::to_string(give->ammo) + ")\n");
+    } else if (auto dmg = vc::protocol::ParseTakeDamage(payload)) {
+        std::lock_guard lock(m_mutex);
+        std::string nick = "#" + std::to_string(dmg->attackerId);
+        if (auto it = m_remotePlayers.find(dmg->attackerId); it != m_remotePlayers.end())
+            nick = it->second.nick;
+        m_pendingDamage.push_back(PendingDamage{nick, dmg->amount, dmg->weapon});
+        Log("net: урон " + std::to_string(static_cast<int>(dmg->amount)) +
+            " от игрока " + nick + "\n");
     } else if (auto vehicleIn = vc::protocol::ParseVehicleStreamIn(payload)) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles[vehicleIn->vehicleId] = RemoteVehicle{
@@ -192,6 +207,26 @@ std::optional<NetClient::LocalTeleport> NetClient::TakePendingTeleport() {
     auto result = m_pendingTeleport;
     m_pendingTeleport.reset();
     return result;
+}
+
+std::vector<vc::protocol::GiveWeaponData> NetClient::TakePendingGiveWeapons() {
+    std::lock_guard lock(m_mutex);
+    std::vector<vc::protocol::GiveWeaponData> result;
+    result.swap(m_pendingGiveWeapons);
+    return result;
+}
+
+std::vector<NetClient::PendingDamage> NetClient::TakePendingDamage() {
+    std::lock_guard lock(m_mutex);
+    std::vector<PendingDamage> result;
+    result.swap(m_pendingDamage);
+    return result;
+}
+
+void NetClient::ReportDamage(std::uint16_t victimId, float amount) {
+    std::lock_guard lock(m_mutex);
+    m_damageOutbox.push_back(
+        vc::protocol::PlayerDamageData{victimId, amount, m_latestWeapon});
 }
 
 void NetClient::NotifyDeath() { m_deathPending.store(true); }
@@ -331,17 +366,32 @@ void NetClient::ThreadMain() {
                                           vc::net::Reliability::ReliableOrdered, 0, now);
         }
 
+        // Доклады об уроне по куклам из игрового потока (ReportDamage).
+        {
+            std::vector<vc::protocol::PlayerDamageData> outbox;
+            {
+                std::lock_guard lock(m_mutex);
+                outbox.swap(m_damageOutbox);
+            }
+            if (m_state.load() == State::Connected)
+                for (const auto& d : outbox)
+                    SendPayloadLockedPeer(vc::protocol::BuildPlayerDamage(d),
+                                          vc::net::Reliability::ReliableOrdered, 0, now);
+        }
+
         if (m_state.load() == State::Connected && now - lastSyncMs >= 100) {
             lastSyncMs = now;
             std::optional<vc::Vector3> position;
             std::uint8_t health = 100;
+            std::uint8_t weapon = 0;
             {
                 std::lock_guard lock(m_mutex);
                 position = m_latestPosition;
                 health = m_latestHealth;
+                weapon = m_latestWeapon;
             }
             if (position) {
-                SendPayloadLockedPeer(vc::protocol::BuildOnFootSync({*position, health}),
+                SendPayloadLockedPeer(vc::protocol::BuildOnFootSync({*position, health, weapon}),
                                       vc::net::Reliability::UnreliableSequenced, 1, now);
             } else if (now - lastKeepAliveMs >= 3000) {
                 // Игрок не заспавнен (меню/пауза) — просто держим сессию живой.

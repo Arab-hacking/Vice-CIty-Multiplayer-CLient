@@ -102,6 +102,8 @@ struct Puppet {
     vc::Vector3 current{};
     float heading = 0.0f;
     std::uint8_t health = 100;
+    int appliedWeapon = -1; // eWeaponType, уже выданный педу-кукле (-1 — ещё нет)
+    float lastWrittenHp = -1.0f; // последнее записанное в педа HP (детект урона)
     std::uint16_t seatedVehicleId = 0; // серверная машина, куда кукла посажена
 };
 
@@ -220,6 +222,46 @@ void* PedVehicleRaw(void* ped) {
     }
 }
 
+// Выдать кукле оружие и взять в руки (игровые GiveWeapon/SetCurrentWeapon —
+// модель в руке вешает сама игра). type=0 — кулаки.
+bool SafePuppetWeaponRaw(void* ped, int weaponType) {
+    using GiveWeaponFn = int (*)(void*, int, unsigned int, bool);
+    using SetCurrentWeaponFn = void (*)(void*, int);
+    VC_TRY {
+        auto give = game::Resolve<GiveWeaponFn>(game::revc::kCPedGiveWeapon);
+        auto setCurrent =
+            game::Resolve<SetCurrentWeaponFn>(game::revc::kCPedSetCurrentWeapon);
+        if (!setCurrent) return false;
+        if (weaponType != 0 && give) give(ped, weaponType, 9999u, true);
+        setCurrent(ped, weaponType);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// HP педа-куклы (CPed::m_fHealth): игра убавляет его при стрельбе локального
+// игрока — по падению относительно сетевого HP детектим урон.
+bool SafeReadPuppetHealthRaw(void* ped, float* out) {
+    VC_TRY {
+        *out = *reinterpret_cast<float*>(static_cast<char*>(ped) +
+                                          game::kPedHealthOffset);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+bool SafeWritePuppetHealthRaw(void* ped, float value) {
+    VC_TRY {
+        *reinterpret_cast<float*>(static_cast<char*>(ped) + game::kPedHealthOffset) =
+            value;
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 } // namespace
 
 PlayerPool& PlayerPool::Instance() {
@@ -289,6 +331,8 @@ void PlayerPool::Tick() {
             g_puppetPeds.erase(puppet.ped);
             puppet.ped = nullptr;
             puppet.seatedVehicleId = 0;
+            puppet.appliedWeapon = -1;
+            puppet.lastWrittenHp = -1.0f;
         }
         if (!puppet.ped) {
             // Позиция (0,0,0) — игрок только подключился, sync ещё не приходил.
@@ -304,6 +348,31 @@ void PlayerPool::Tick() {
             continue;
         }
         puppet.health = remote.health;
+        // Оружие куклы и детект урона по ней: локальный игрок стреляет по
+        // педу-кукле, игра убавляет ему HP — видим падение ниже последнего
+        // записанного сетевого HP и докладываем серверу (PlayerDamage).
+        if (remote.inVehicleId == 0) {
+            if (remote.weapon != puppet.appliedWeapon &&
+                SafePuppetWeaponRaw(puppet.ped, remote.weapon)) {
+                puppet.appliedWeapon = remote.weapon;
+                Log(("pool: кукла " + remote.nick + " взяла оружие id " +
+                     std::to_string(remote.weapon) + "\n").c_str());
+            }
+            float pedHp = 0.0f;
+            if (SafeReadPuppetHealthRaw(puppet.ped, &pedHp)) {
+                if (puppet.lastWrittenHp >= 0.0f &&
+                    pedHp < puppet.lastWrittenHp - 0.5f) {
+                    const float delta = puppet.lastWrittenHp - pedHp;
+                    vc::network::NetClient::Instance().ReportDamage(remote.id, delta);
+                    vc::network::NetClient::Instance().AddLocalChatLine(
+                        "Вы нанесли " + std::to_string(static_cast<int>(delta)) +
+                        " урона игроку " + remote.nick);
+                }
+                SafeWritePuppetHealthRaw(puppet.ped,
+                                          static_cast<float>(remote.health));
+                puppet.lastWrittenHp = static_cast<float>(remote.health);
+            }
+        }
 
         // Посадка/высадка: сервер сообщает через VehicleOccupant, в какой
         // машине сидит игрок. Посаженную куклу ведёт сама игра — мы её не
@@ -314,6 +383,8 @@ void PlayerPool::Tick() {
                 g_puppetPeds.erase(puppet.ped);
                 puppet.ped = nullptr;
                 puppet.seatedVehicleId = 0;
+                puppet.appliedWeapon = -1;
+                puppet.lastWrittenHp = -1.0f;
                 Log(("pool: кукла " + remote.nick + " высажена (пересоздана)\n").c_str());
                 continue; // пересоздастся на следующем кадре уже пешком
             }
