@@ -216,22 +216,24 @@ void TestCodec() {
     CHECK(parsedTp && parsedTp->position.y == -589.1f && parsedTp->heading == 0.25f);
 
     const auto vehIn =
-        vc::protocol::BuildVehicleStreamIn({5, 141, {10.0f, -20.0f, 12.5f}, 1.5f});
+        vc::protocol::BuildVehicleStreamIn({5, 141, {10.0f, -20.0f, 12.5f}, 1.5f, 432});
     const auto parsedVeh = vc::protocol::ParseVehicleStreamIn(vehIn);
     CHECK(parsedVeh && parsedVeh->vehicleId == 5 && parsedVeh->model == 141 &&
-          parsedVeh->position.z == 12.5f && parsedVeh->heading == 1.5f);
+          parsedVeh->position.z == 12.5f && parsedVeh->heading == 1.5f &&
+          parsedVeh->health == 432);
     const auto parsedVehOut =
         vc::protocol::ParseVehicleStreamOut(vc::protocol::BuildVehicleStreamOut(5));
     CHECK(parsedVehOut && *parsedVehOut == 5);
 
     const auto posePkt = vc::protocol::BuildInVehicleSync(
-        {7, {1.5f, -2.5f, 3.5f}, 0.1f, 0.2f, 0.3f, 0.9f});
+        {7, {1.5f, -2.5f, 3.5f}, 0.1f, 0.2f, 0.3f, 0.9f, 777});
     const auto pose = vc::protocol::ParseInVehicleSync(posePkt);
     CHECK(pose && pose->vehicleId == 7 && pose->position.y == -2.5f &&
-          pose->quatZ == 0.3f && pose->quatW == 0.9f);
+          pose->quatZ == 0.3f && pose->quatW == 0.9f && pose->health == 777);
     const auto pose2 = vc::protocol::ParseVehicleSyncUpdate(
         vc::protocol::BuildVehicleSyncUpdate({7, {1.5f, -2.5f, 3.5f}, 0.0f, 0.0f, 0.0f, 1.0f}));
-    CHECK(pose2 && pose2->vehicleId == 7 && pose2->quatW == 1.0f);
+    CHECK(pose2 && pose2->vehicleId == 7 && pose2->quatW == 1.0f &&
+          pose2->health == 1000); // дефолт агрегата
     const auto enter = vc::protocol::ParseEnterVehicle(
         vc::protocol::BuildEnterVehicle({42, 0}));
     CHECK(enter && enter->vehicleId == 42 && enter->seat == 0);

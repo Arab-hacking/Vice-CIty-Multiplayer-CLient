@@ -57,8 +57,9 @@ void* SafeFindPlayerVehicle() {
 }
 
 // Поза машины из встроенной матрицы: pos (+0x38) + базис (right/forward/up)
-// + dword флагов. POD SEH-обёртка.
-bool SafeReadVehiclePose(void* vehicle, float* pos, float* rows, unsigned int* flags) {
+// + dword флагов + HP (CVehicle::m_fHealth). POD SEH-обёртка.
+bool SafeReadVehiclePose(void* vehicle, float* pos, float* rows, unsigned int* flags,
+                         float* health) {
     VC_TRY {
         const auto* base = static_cast<const char*>(vehicle);
         const float* m = reinterpret_cast<const float*>(base + kEmbeddedMatrixOffset);
@@ -67,6 +68,7 @@ bool SafeReadVehiclePose(void* vehicle, float* pos, float* rows, unsigned int* f
         rows[6] = m[8]; rows[7] = m[9]; rows[8] = m[10];
         pos[0] = m[12]; pos[1] = m[13]; pos[2] = m[14];
         *flags = *reinterpret_cast<const unsigned int*>(base + kEntityFlagsOffset);
+        *health = *reinterpret_cast<const float*>(base + kVehicleHealthOffset);
         return true;
     } VC_EXCEPT {
         return false;
@@ -221,8 +223,9 @@ void OnFrameAfterOriginal() {
                 // выходит штатной клавишей игры).
                 float vp[3] = {};
                 float vr[9] = {};
+                float vhp = 0.0f;
                 unsigned int vf = 0;
-                if (SafeReadVehiclePose(myVehicle, vp, vr, &vf) &&
+                if (SafeReadVehiclePose(myVehicle, vp, vr, &vf, &vhp) &&
                     SafeFindSeat(myVehicle, ped, vf) > 0 && LeaveCarRaw(ped, myVehicle))
                     net.AddLocalChatLine("[G] выхожу из машины");
             } else if (position) {
@@ -253,10 +256,12 @@ void OnFrameAfterOriginal() {
         int seat = -1;
         float vpos[3] = {};
         float vrows[9] = {};
+        float vhealth = 1000.0f;
         if (myVehicle && ped) {
             serverId = vc::pools::VehiclePool::Instance().ServerIdOf(myVehicle);
             unsigned int vflags = 0;
-            if (serverId != 0 && SafeReadVehiclePose(myVehicle, vpos, vrows, &vflags))
+            if (serverId != 0 &&
+                SafeReadVehiclePose(myVehicle, vpos, vrows, &vflags, &vhealth))
                 seat = SafeFindSeat(myVehicle, ped, vflags);
         }
         auto& net = vc::network::NetClient::Instance();
@@ -285,8 +290,12 @@ void OnFrameAfterOriginal() {
             const vc::Quaternion q = vc::QuatFromBasis(
                 {vrows[0], vrows[1], vrows[2]}, {vrows[3], vrows[4], vrows[5]},
                 {vrows[6], vrows[7], vrows[8]});
+            float hp = vhealth;
+            if (!(hp >= 0.0f)) hp = 0.0f; // NaN/отрицательное -> 0
+            if (hp > 1000.0f) hp = 1000.0f;
             net.SetLocalVehicleState(vc::network::NetClient::LocalVehicleState{
-                serverId, vc::Vector3{vpos[0], vpos[1], vpos[2]}, q});
+                serverId, vc::Vector3{vpos[0], vpos[1], vpos[2]}, q,
+                static_cast<std::uint16_t>(hp)});
         } else {
             net.SetLocalVehicleState(std::nullopt);
         }

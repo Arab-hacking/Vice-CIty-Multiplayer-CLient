@@ -159,6 +159,7 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles[vehicleIn->vehicleId] = RemoteVehicle{
             vehicleIn->vehicleId, vehicleIn->model, vehicleIn->position, vehicleIn->heading};
+        m_remoteVehicles[vehicleIn->vehicleId].health = vehicleIn->health;
         Log("net: stream-in машины id " + std::to_string(vehicleIn->vehicleId) +
             " (модель " + std::to_string(vehicleIn->model) + ")\n");
     } else if (auto vehicleOut = vc::protocol::ParseVehicleStreamOut(payload)) {
@@ -180,6 +181,7 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
             it->second.position = pose->position;
             it->second.targetQuat = {pose->quatX, pose->quatY, pose->quatZ, pose->quatW};
             it->second.hasPose = true;
+            it->second.health = pose->health;
             ++it->second.syncCount;
         }
     }
@@ -309,7 +311,8 @@ void NetClient::ThreadMain() {
                     SendPayloadLockedPeer(
                         vc::protocol::BuildInVehicleSync(
                             {local->vehicleId, local->position, local->quat.x,
-                             local->quat.y, local->quat.z, local->quat.w}),
+                             local->quat.y, local->quat.z, local->quat.w,
+                             local->health}),
                         vc::net::Reliability::UnreliableSequenced, 2, now);
                 }
             }

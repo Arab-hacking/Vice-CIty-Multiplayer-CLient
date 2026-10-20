@@ -88,6 +88,7 @@ struct VehicleStreamInData {
     std::uint16_t model = 0;
     Vector3 position{};
     float heading = 0.0f;
+    std::uint16_t health = 1000; // протокол v8: 1000 — целая, 0 — взорвана
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildVehicleStreamIn(const VehicleStreamInData& data);
 [[nodiscard]] std::optional<VehicleStreamInData> ParseVehicleStreamIn(
@@ -117,6 +118,7 @@ struct VehiclePoseData {
     float quatY = 0.0f;
     float quatZ = 0.0f;
     float quatW = 1.0f;
+    std::uint16_t health = 1000; // протокол v8
 };
 [[nodiscard]] std::vector<std::uint8_t> BuildInVehicleSync(const VehiclePoseData& data);
 [[nodiscard]] std::optional<VehiclePoseData> ParseInVehicleSync(

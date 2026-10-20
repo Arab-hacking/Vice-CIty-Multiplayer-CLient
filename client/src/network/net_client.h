@@ -65,6 +65,7 @@ public:
         vc::Quaternion targetQuat{}; // последняя поза от водителя (hasPose)
         bool hasPose = false;
         std::uint64_t syncCount = 0;
+        std::uint16_t health = 1000; // HP от водителя/стрима (протокол v8)
     };
     [[nodiscard]] std::vector<RemoteVehicle> RemoteVehicles() const;
 
@@ -73,6 +74,7 @@ public:
         std::uint16_t vehicleId = 0;
         vc::Vector3 position{};
         vc::Quaternion quat{};
+        std::uint16_t health = 1000;
     };
     void SetLocalVehicleState(const std::optional<LocalVehicleState>& state);
     // Края посадки/выхода (игровой поток заметил смену FindPlayerVehicle).

@@ -218,6 +218,7 @@ std::vector<std::uint8_t> BuildVehicleStreamIn(const VehicleStreamInData& data) 
     w.F32(data.position.y);
     w.F32(data.position.z);
     w.F32(data.heading);
+    w.U16(data.health);
     return w.out;
 }
 
@@ -230,6 +231,7 @@ std::optional<VehicleStreamInData> ParseVehicleStreamIn(
     data.model = r.U16();
     data.position = Vector3{r.F32(), r.F32(), r.F32()};
     data.heading = r.F32();
+    data.health = r.U16();
     if (!r.ok) return std::nullopt;
     return data;
 }
@@ -306,6 +308,7 @@ std::vector<std::uint8_t> BuildVehiclePose(std::uint8_t packetId,
     w.F32(data.quatY);
     w.F32(data.quatZ);
     w.F32(data.quatW);
+    w.U16(data.health);
     return w.out;
 }
 
@@ -320,6 +323,7 @@ std::optional<VehiclePoseData> ParseVehiclePose(std::uint8_t packetId,
     data.quatY = r.F32();
     data.quatZ = r.F32();
     data.quatW = r.F32();
+    data.health = r.U16();
     if (!r.ok) return std::nullopt;
     return data;
 }

@@ -13,6 +13,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -57,6 +58,7 @@ struct SpawnedVehicle {
     long long nextRetryTick = 0;      // раньше этого кадра не повторять
     bool fellReported = false;        // watchdog уже ругался в лог
     bool occupiedReported = false;    // удаление отложено из-за игрока внутри
+    float appliedHealth = -1.0f;      // последнее HP, записанное в игру (-1 — ещё не писали)
 };
 
 std::map<std::uint16_t, SpawnedVehicle> g_vehicles;
@@ -194,6 +196,19 @@ bool LocalPlayerDrivingRaw(void* vehicle) {
                 base + game::kVehiclePassengersOffset + i * sizeof(void*));
             if (occupant == ped) return false; // пассажир
         }
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// Запись HP в CVehicle::m_fHealth: дым/огонь/взрыв игра сделает сама
+// (CAutomobile::ProcessControl смотрит m_fHealth каждый кадр: <250 — огонь
+// и взрыв через ~5 с, статус двигателя для дыма тоже считается от HP).
+bool ApplyVehicleHealthRaw(void* vehicle, float health) {
+    VC_TRY {
+        *reinterpret_cast<float*>(static_cast<char*>(vehicle) +
+                                  game::kVehicleHealthOffset) = health;
         return true;
     } VC_EXCEPT {
         return false;
@@ -414,6 +429,15 @@ void VehiclePool::Tick() {
                 // парковок: пере-запрос раз в ~0.5 с флагами «не выгружать».
                 game::Resolve<RequestModelFn>(game::revc::kCStreamingRequestModel)(
                     remote.model, kStreamFlagsKeep);
+            }
+            // HP от сервера: водитель — источник, мы записываем в игру при
+            // изменении (дым/огонь/взрыв — забота движка). Машину локального
+            // водителя не трогаем: он сам источник HP.
+            if (!LocalPlayerDrivingRaw(spawned.vehicle)) {
+                const float hp = static_cast<float>(remote.health);
+                if (std::fabs(hp - spawned.appliedHealth) > 0.5f &&
+                    ApplyVehicleHealthRaw(spawned.vehicle, hp))
+                    spawned.appliedHealth = hp;
             }
             // Сетевая поза от водителя: интерполяция и постановка каждый кадр
             // (как куклы педов). Пропускаем только если локальный игрок сам

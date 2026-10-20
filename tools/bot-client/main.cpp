@@ -32,9 +32,11 @@ int main(int argc, char** argv) {
     std::string say = "Привет! Я тестовый бот vc-bot.";
     int seconds = 5;
     bool drive = false;
+    bool damage = false;
     int driveSeat = 0;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--drive") drive = true;
+        if (std::string(argv[i]) == "--damage") damage = true;
         if (std::string(argv[i]) == "--seat" && i + 1 < argc)
             driveSeat = std::atoi(argv[i + 1]);
     }
@@ -101,12 +103,14 @@ int main(int argc, char** argv) {
                                 occ->vehicleId, occ->playerId, occ->seat);
                     std::fflush(stdout);
                 } else if (auto vu = vc::protocol::ParseVehicleSyncUpdate(payload)) {
-                    static int vehPrinted = 0;
-                    if (vehPrinted < 6) {
-                        ++vehPrinted;
-                        std::printf("[bot] машина id %u едет (%.1f, %.1f, %.1f)\n",
+                    static int lastHpBucket = -1;
+                    const int bucket = static_cast<int>(vu->health / 200);
+                    if (bucket != lastHpBucket) {
+                        lastHpBucket = bucket;
+                        std::printf("[bot] машина id %u едет (%.1f, %.1f, %.1f) hp=%u\n",
                                     vu->vehicleId, vu->position.x, vu->position.y,
-                                    vu->position.z);
+                                    vu->position.z,
+                                    static_cast<unsigned>(vu->health));
                         std::fflush(stdout);
                     }
                 } else if (auto si = vc::protocol::ParsePlayerStreamIn(payload)) {
@@ -160,9 +164,16 @@ int main(int argc, char** argv) {
                     drivePhase += 0.05f;
                     const float cx = -390.0f + std::cos(drivePhase) * 12.0f;
                     const float cy = -540.0f + std::sin(drivePhase) * 12.0f;
+                    // --damage: HP тает до нуля примерно за один круг (~13 с).
+                    std::uint16_t hp = 1000;
+                    if (damage) {
+                        const int left = 1000 - static_cast<int>(drivePhase * 160.0f);
+                        hp = static_cast<std::uint16_t>(left < 0 ? 0 : left);
+                    }
                     send(vc::protocol::BuildInVehicleSync(
                              {driveVehicleId, {cx, cy, 17.5f}, 0.0f, 0.0f,
-                              std::sin(drivePhase * 0.5f), std::cos(drivePhase * 0.5f)}),
+                              std::sin(drivePhase * 0.5f), std::cos(drivePhase * 0.5f),
+                              hp}),
                          vc::net::Reliability::UnreliableSequenced, 2);
                 }
             }

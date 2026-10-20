@@ -46,6 +46,10 @@ inline constexpr std::uintptr_t kFrameMatrixPtrOffset = 0x48;
 inline constexpr std::uintptr_t kEntityFlagsOffset = 0x60;
 inline constexpr std::uintptr_t kEntityModelIndexOffset = 0x6C;
 inline constexpr std::uintptr_t kVehicleDoorLockOffset = 0x2D8;
+// CVehicle::m_fHealth на veh+0x2A0 (float, 1000 — целая, <250 — горит).
+// Посчитано по Vehicle.h от якоря pDriver=+0x218; цепочка полей вниз даёт
+// m_nDoorLock ровно на известном рабочем +0x2D8 — раскладка подтверждена.
+inline constexpr std::uintptr_t kVehicleHealthOffset = 0x2A0;
 // CStreamingInfo: шаг массива 0x20, m_loadState на +0x10 (STREAMSTATE_LOADED=1),
 // m_flags на +0x11. HasModelLoaded(id) == (loadState == 1).
 inline constexpr std::uintptr_t kStreamingInfoStride = 0x20;

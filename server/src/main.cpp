@@ -150,6 +150,7 @@ struct ServerVehicle {
     // playerId=0 — валидный первый игрок.
     std::int32_t seats[4] = {-1, -1, -1, -1};
     float quat[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // последняя поза от водителя
+    std::uint16_t health = 1000; // последнее HP от водителя (1000 — целая)
 };
 std::vector<ServerVehicle> g_vehicles;
 std::uint16_t g_nextVehicleId = 1;
@@ -253,7 +254,7 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
             if (it != g_vehicles.end())
                 Send(socket, session,
                      vc::protocol::BuildVehicleStreamIn(
-                         {it->id, it->model, it->position, it->heading}),
+                         {it->id, it->model, it->position, it->heading, it->health}),
                      vc::net::Reliability::ReliableOrdered, 0);
             // Сразу сообщить, кто уже сидит внутри.
             if (it != g_vehicles.end())
@@ -694,6 +695,12 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                 v.quat[1] = pose->quatY;
                 v.quat[2] = pose->quatZ;
                 v.quat[3] = pose->quatW;
+                if (v.health > 0 && pose->health == 0) {
+                    std::printf("[server] Машина id %u взорвана (водитель %s)\n", v.id,
+                                session.nick.c_str());
+                    std::fflush(stdout);
+                }
+                v.health = pose->health;
                 const auto update = vc::protocol::BuildVehicleSyncUpdate(*pose);
                 for (auto& [key, other] : sessions) {
                     if (!other.joined || other.playerId == session.playerId) continue;
@@ -933,7 +940,7 @@ int main(int argc, char** argv) {
                         v.quat[3] = std::cos(bot.phase * 0.5f);
                         const auto update = vc::protocol::BuildVehicleSyncUpdate(
                             {v.id, v.position, v.quat[0], v.quat[1], v.quat[2],
-                             v.quat[3]});
+                             v.quat[3], v.health});
                         for (auto& [key, other] : sessions) {
                             if (!other.joined) continue;
                             if (!other.streamedVehicles.contains(v.id)) continue;
