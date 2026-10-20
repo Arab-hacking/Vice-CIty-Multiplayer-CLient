@@ -34,6 +34,8 @@ public:
     // Вызывается из игрового потока каждый кадр.
     void SetPlayerState(const std::optional<vc::Vector3>& position, std::uint8_t health);
     void SendChat(const std::string& text);
+    // Локальная служебная строка в окно чата (не уходит на сервер).
+    void AddLocalChatLine(const std::string& text);
 
     [[nodiscard]] State GetState() const { return m_state.load(); }
     [[nodiscard]] std::uint16_t PlayerId() const { return m_playerId.load(); }
@@ -76,6 +78,9 @@ public:
     // Края посадки/выхода (игровой поток заметил смену FindPlayerVehicle).
     void NotifyEnterVehicle(std::uint16_t vehicleId, std::uint8_t seat);
     void NotifyExitVehicle();
+    // Есть ли свободное пассажирское место (1..3) в серверной машине по
+    // данным VehicleOccupant. Посадка локального игрока пассажиром (G).
+    [[nodiscard]] bool HasFreePassengerSeat(std::uint16_t vehicleId) const;
 
     // Телепорт локального игрока от сервера (спавн, /tp, /kill, смерть).
     // Игровой поток забирает, когда мир готов и игрок жив.

@@ -258,7 +258,7 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
                 for (const std::string& line : chatLines)
                     ImGui::TextWrapped("%s", line.c_str());
                 ImGui::Separator();
-                ImGui::TextDisabled("T - чат, F7 - панель");
+                ImGui::TextDisabled("T - чат, G - сесть/выйти пассажиром, F7 - панель");
             }
             ImGui::End();
         }
@@ -305,6 +305,7 @@ bool GetVtableAddresses(void** outEndScene, void** outReset) {
 } // namespace
 
 bool IsChatOpen() { return g_chatOpen; }
+bool IsOverlayVisible() { return g_visible; }
 
 bool InstallOverlayHooks(FILE* log) {
     g_log = log;

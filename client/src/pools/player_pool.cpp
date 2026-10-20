@@ -208,6 +208,18 @@ bool SeatPuppetRaw(void* ped, void* vehicle, bool driver) {
     }
 }
 
+// Машина, в которой пед сидит ФАКТИЧЕСКИ (CPed::m_pMyVehicle), или null.
+// Игра может выкинуть куклу локально (локальный игрок вытащил водителя) —
+// по этому полю Tick замечает расхождение с серверным состоянием.
+void* PedVehicleRaw(void* ped) {
+    VC_TRY {
+        return *reinterpret_cast<void**>(static_cast<char*>(ped) +
+                                         game::kPedMyVehicleOffset);
+    } VC_EXCEPT {
+        return nullptr;
+    }
+}
+
 } // namespace
 
 PlayerPool& PlayerPool::Instance() {
@@ -312,12 +324,39 @@ void PlayerPool::Tick() {
             }
         }
         if (puppet.seatedVehicleId != 0) {
+            void* vehicle = VehiclePool::Instance().GameVehicleOf(puppet.seatedVehicleId);
             // Машину могли удалить из-под куклы (стрим-аут): пересаживаем на ноги.
-            if (!VehiclePool::Instance().GameVehicleOf(puppet.seatedVehicleId)) {
+            if (!vehicle) {
                 DestroyPuppet(puppet.ped);
                 g_puppetPeds.erase(puppet.ped);
                 puppet.ped = nullptr;
                 puppet.seatedVehicleId = 0;
+            } else if (PedVehicleRaw(puppet.ped) != vehicle) {
+                // Самолечение: игра выкинула куклу из машины локально
+                // (локальный игрок вытащил водителя-куклу у себя на экране),
+                // хотя по серверу игрок всё ещё сидит. Возвращаем куклу в
+                // салон — но только когда локальный игрок сам не внутри этой
+                // машины (не мешаем угону). Редкие попытки, чтобы не спамить
+                // warp каждый кадр при стойкой проблеме.
+                auto findVeh = game::Resolve<game::FindPlayerVehicleFn>(
+                    game::revc::kFindPlayerVehicle);
+                const bool localInside = findVeh && findVeh() == vehicle;
+                static std::uint64_t healCounter = 0;
+                if (!localInside && (++healCounter % 30) == 0) {
+                    if (PedVehicleRaw(puppet.ped) == nullptr) {
+                        if (SeatPuppetRaw(puppet.ped, vehicle, remote.seat == 0))
+                            Log(("pool: кукла " + remote.nick +
+                                 " возвращена в машину (heal)\n")
+                                    .c_str());
+                    } else {
+                        // Кукла оказалась в ЧУЖОЙ машине: warp поверх нельзя
+                        // (игра не выписывает из старой) — пересоздаём.
+                        DestroyPuppet(puppet.ped);
+                        g_puppetPeds.erase(puppet.ped);
+                        puppet.ped = nullptr;
+                        puppet.seatedVehicleId = 0;
+                    }
+                }
             }
             puppet.current = remote.targetPosition; // для никнейма над машиной
             continue;

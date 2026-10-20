@@ -104,6 +104,8 @@ void NetClient::SendChat(const std::string& text) {
     m_chatOutbox.push_back(text);
 }
 
+void NetClient::AddLocalChatLine(const std::string& text) { PushChatLine(text); }
+
 void NetClient::SendPayloadLockedPeer(const std::vector<std::uint8_t>& payload,
                                       vc::net::Reliability reliability, std::uint8_t channel,
                                       std::uint64_t nowMs) {
@@ -202,6 +204,15 @@ void NetClient::NotifyEnterVehicle(std::uint16_t vehicleId, std::uint8_t seat) {
 }
 
 void NetClient::NotifyExitVehicle() { m_vehicleEvent.store(-1); }
+
+bool NetClient::HasFreePassengerSeat(std::uint16_t vehicleId) const {
+    std::lock_guard lock(m_mutex);
+    bool taken[3] = {};
+    for (const auto& [playerId, where] : m_occupancy)
+        if (where.first == vehicleId && where.second >= 1 && where.second <= 3)
+            taken[where.second - 1] = true;
+    return !(taken[0] && taken[1] && taken[2]);
+}
 
 std::vector<NetClient::RemotePlayer> NetClient::RemotePlayers() const {
     std::lock_guard lock(m_mutex);

@@ -60,5 +60,9 @@ inline constexpr std::uintptr_t kPhysicalTurnSpeedOffset = 0x8C;
 // (1..3 в нашем протоколе) = pPassengers[N-1]. Водитель — pDriver (не нужен:
 // водитель определяется как «в машине, но не в pPassengers»).
 inline constexpr std::uintptr_t kVehiclePassengersOffset = 0x220;
+// CPed::m_pMyVehicle на ped+0x4C0, bInVehicle байт на ped+0x4C8,
+// CVehicle::pDriver на veh+0x218 (дизасм CPed::WarpPedIntoCar этой сборки).
+inline constexpr std::uintptr_t kPedMyVehicleOffset = 0x4C0;
+inline constexpr std::uintptr_t kVehicleDriverOffset = 0x218;
 
 } // namespace vc::game

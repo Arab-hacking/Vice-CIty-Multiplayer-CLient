@@ -178,6 +178,28 @@ void* LocalPlayerVehicleRaw() {
     }
 }
 
+// Локальный игрок — именно ВОДИТЕЛЬ этой машины (сидит в ней и не числится
+// в pPassengers). Сетевую позу пропускаем только для водителя: пассажир
+// должен ехать по позам удалённого водителя.
+bool LocalPlayerDrivingRaw(void* vehicle) {
+    VC_TRY {
+        auto findVeh = game::Resolve<game::FindPlayerVehicleFn>(game::revc::kFindPlayerVehicle);
+        auto findPed = game::Resolve<game::FindPlayerPedFn>(game::revc::kFindPlayerPed);
+        if (!findVeh || !findPed || !vehicle) return false;
+        void* ped = findPed();
+        if (!ped || findVeh() != vehicle) return false;
+        const auto* base = static_cast<const char*>(vehicle);
+        for (int i = 0; i < 8; ++i) {
+            void* occupant = *reinterpret_cast<void* const*>(
+                base + game::kVehiclePassengersOffset + i * sizeof(void*));
+            if (occupant == ped) return false; // пассажир
+        }
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 // Применение сетевой позы: Remove + полная матрица (базис кватерниона) +
 // зануление скоростей CPhysical + копия в Rw-фрейм + Add. Без зануления
 // скоростей локальная физика утаскивает машину от позы между кадрами.
@@ -307,6 +329,27 @@ void* VehiclePool::GameVehicleOf(std::uint16_t serverId) const {
     return it != g_vehicles.end() ? it->second.vehicle : nullptr;
 }
 
+bool VehiclePool::NearestServerVehicle(vc::Vector3 pos, float maxDist,
+                                       std::uint16_t& outServerId,
+                                       void*& outVehicle) const {
+    float bestSq = maxDist * maxDist;
+    bool found = false;
+    for (const auto& [id, spawned] : g_vehicles) {
+        if (!spawned.vehicle) continue;
+        const float dx = spawned.current.x - pos.x;
+        const float dy = spawned.current.y - pos.y;
+        const float dz = spawned.current.z - pos.z;
+        const float dSq = dx * dx + dy * dy + dz * dz;
+        if (dSq < bestSq) {
+            bestSq = dSq;
+            outServerId = id;
+            outVehicle = spawned.vehicle;
+            found = true;
+        }
+    }
+    return found;
+}
+
 void VehiclePool::Tick() {
     ++g_tickCount;
     const auto remotes = vc::network::NetClient::Instance().RemoteVehicles();
@@ -373,9 +416,10 @@ void VehiclePool::Tick() {
                     remote.model, kStreamFlagsKeep);
             }
             // Сетевая поза от водителя: интерполяция и постановка каждый кадр
-            // (как куклы педов). Машину локального игрока не трогаем — он сам
-            // источник позы.
-            if (remote.hasPose && spawned.vehicle != LocalPlayerVehicleRaw()) {
+            // (как куклы педов). Пропускаем только если локальный игрок сам
+            // за рулём (он источник позы); пассажиру поза нужна — он едет
+            // вместе с машиной.
+            if (remote.hasPose && !LocalPlayerDrivingRaw(spawned.vehicle)) {
                 const float dx = remote.position.x - spawned.current.x;
                 const float dy = remote.position.y - spawned.current.y;
                 const float dz = remote.position.z - spawned.current.z;

@@ -11,5 +11,7 @@ bool InstallOverlayHooks(FILE* log);
 
 // Открыта ли строка ввода чата (хук кадра замораживает игрока, пока печатает).
 bool IsChatOpen();
+// Видна ли панель F7 (хук кадра не ловит игровые клавиши, пока печатают в полях).
+bool IsOverlayVisible();
 
 } // namespace vc::render

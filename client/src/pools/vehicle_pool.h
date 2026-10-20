@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
+
+#include <shared/math/vector3.h>
 
 // Пул серверных машин (Этап 4, шаг 1): по данным NetClient создаёт в игре
 // CAutomobile на каждую серверную машину в стриме (CPool<CVehicle>::New +
@@ -22,6 +25,11 @@ public:
     // Игровая машина по серверному id (nullptr — ещё не заспавнена локально).
     // PlayerPool сажает в неё кукол сидящих игроков.
     [[nodiscard]] void* GameVehicleOf(std::uint16_t serverId) const;
+    // Ближайшая заспавненная серверная машина к точке в радиусе maxDist.
+    // Посадка локального игрока пассажиром по G.
+    [[nodiscard]] bool NearestServerVehicle(vc::Vector3 pos, float maxDist,
+                                            std::uint16_t& outServerId,
+                                            void*& outVehicle) const;
 
 private:
     VehiclePool() = default;

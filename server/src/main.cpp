@@ -470,7 +470,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         g_bots.push_back(bot);
         g_vehicles.push_back(vehicle);
         StreamTick(socket, sessions); // кукла, машина и occupant появятся сразу
-        reply("Бот-водитель " + bot.nick + " едет по кругу! Садись пассажиром. /unbot - убрать");
+        reply("Бот-водитель " + bot.nick + " едет по кругу! G рядом с машиной - сесть пассажиром. /unbot - убрать");
         std::printf("[server] Создан бот-водитель %s (id %u, машина %u) для %s\n",
                     bot.nick.c_str(), bot.id, vehicle.id, session.nick.c_str());
         std::fflush(stdout);
@@ -918,10 +918,11 @@ int main(int argc, char** argv) {
             for (auto& bot : g_bots) {
                 if (bot.driving) {
                     bot.phase += 0.05f; // 0.5 рад/с * 12 м -> ~6 м/с
-                    // z позы — матрица машины: ноги + ~1 м (как поза живого водителя).
+                    // z позы — матрица машины: ноги + высота покоя (~0.35 м;
+                    // +1.0 давало видимую «левитацию» над дорогой).
                     bot.position = {bot.center.x + std::cos(bot.phase) * 12.0f,
                                     bot.center.y + std::sin(bot.phase) * 12.0f,
-                                    bot.center.z + 1.0f};
+                                    bot.center.z + 0.35f};
                     for (auto& v : g_vehicles) {
                         if (v.id != bot.vehicleId) continue;
                         v.position = bot.position;

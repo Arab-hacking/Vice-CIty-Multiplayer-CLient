@@ -108,6 +108,42 @@ bool SafeTeleportLocalPed(void* ped, float x, float y, float z, float heading) {
     }
 }
 
+using SetObjectiveFn = void (*)(void*, int, void*);
+using WarpPedIntoCarFn = void (*)(void*, void*);
+constexpr int kObjectiveLeaveCar = 16;         // eObjective (Ped.h)
+constexpr int kObjectiveEnterCarPassenger = 17;
+
+// Посадка ЛОКАЛЬНОГО игрока пассажиром: в самой VC такой функции нет (Enter
+// всегда сажает водителем) — берём миссионный путь SetObjective(17) +
+// WarpPedIntoCar. Нюанс: WarpPedIntoCar для игрока ставит машине
+// STATUS_PLAYER, из-за чего игра читала бы ввод пассажира как водительский;
+// возвращаем STATUS_PHYSICS(3) — машину ведут сетевые позы.
+bool SeatLocalPassengerRaw(void* ped, void* vehicle) {
+    VC_TRY {
+        Resolve<SetObjectiveFn>(revc::kCPedSetObjective)(ped, kObjectiveEnterCarPassenger,
+                                                          vehicle);
+        Resolve<WarpPedIntoCarFn>(revc::kCPedWarpPedIntoCar)(ped, vehicle);
+        auto* flags = reinterpret_cast<unsigned int*>(static_cast<char*>(vehicle) +
+                                                       kEntityFlagsOffset);
+        *flags = (*flags & ~0xF8u) | (3u << 3); // STATUS_PHYSICS
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
+// Выход пассажира: тот же OBJECTIVE_LEAVE_CAR, что игра сама ставит по
+// клавише выхода (CPlayerInfo::Process) — анимацию и выписку из машины
+// (RemovePassenger и т.д.) делает игра.
+bool LeaveCarRaw(void* ped, void* vehicle) {
+    VC_TRY {
+        Resolve<SetObjectiveFn>(revc::kCPedSetObjective)(ped, kObjectiveLeaveCar, vehicle);
+        return true;
+    } VC_EXCEPT {
+        return false;
+    }
+}
+
 void OnFrameAfterOriginal() {
     ++g_frame;
 
@@ -168,6 +204,45 @@ void OnFrameAfterOriginal() {
     vc::network::NetClient::Instance().SetPlayerState(position, health);
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
+
+    // G — сесть пассажиром в ближайшую серверную машину / выйти из неё (как
+    // в SA-MP; в самой VC посадки пассажиром нет). Фактическое место следом
+    // определит блок ниже по pPassengers и сам доложит серверу.
+    {
+        static bool gWasDown = false;
+        const bool gDown = (GetAsyncKeyState('G') & 0x8000) != 0;
+        const bool pressed = gDown && !gWasDown;
+        gWasDown = gDown;
+        if (pressed && ped && rawHealth > 0.0f && !vc::render::IsChatOpen() &&
+            !vc::render::IsOverlayVisible()) {
+            auto& net = vc::network::NetClient::Instance();
+            if (void* myVehicle = SafeFindPlayerVehicle()) {
+                // Уже в машине: G высаживает только пассажира (водитель
+                // выходит штатной клавишей игры).
+                float vp[3] = {};
+                float vr[9] = {};
+                unsigned int vf = 0;
+                if (SafeReadVehiclePose(myVehicle, vp, vr, &vf) &&
+                    SafeFindSeat(myVehicle, ped, vf) > 0 && LeaveCarRaw(ped, myVehicle))
+                    net.AddLocalChatLine("[G] выхожу из машины");
+            } else if (position) {
+                std::uint16_t nearId = 0;
+                void* nearVeh = nullptr;
+                if (vc::pools::VehiclePool::Instance().NearestServerVehicle(
+                        *position, 8.0f, nearId, nearVeh)) {
+                    if (!net.HasFreePassengerSeat(nearId)) {
+                        net.AddLocalChatLine("[G] в ближайшей машине нет свободных пассажирских мест");
+                    } else if (SeatLocalPassengerRaw(ped, nearVeh)) {
+                        char buf[96];
+                        std::snprintf(buf, sizeof(buf),
+                                      "[G] сажусь пассажиром в машину id %u (G - выйти)",
+                                      nearId);
+                        net.AddLocalChatLine(buf);
+                    }
+                }
+            }
+        }
+    }
 
     // Локальный игрок в СЕРВЕРНОЙ машине? Края посадки + поза (только водитель).
     {
