@@ -21,6 +21,7 @@
 #include "game/revc.h"
 #include "network/net_client.h"
 #include "pools/player_pool.h"
+#include "pools/object_pool.h"
 #include "pools/vehicle_pool.h"
 #include "render/overlay.h"
 
@@ -121,6 +122,7 @@ DWORD WINAPI InitThread(LPVOID) {
         // Пул сетевых кукол (хук ProcessControl) и сеть из vc-client.ini.
         vc::pools::PlayerPool::Instance().Init(log);
         vc::pools::VehiclePool::Instance().Init(log);
+        vc::pools::ObjectPool::Instance().Init(log);
         vc::network::NetClient::Instance().Init(log, DllDirectory() + "vc-client.ini");
         // Лог НЕ закрываем: хуки пишут в него из игрового потока всю сессию.
     } else {

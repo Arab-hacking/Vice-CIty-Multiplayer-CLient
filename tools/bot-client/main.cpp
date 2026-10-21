@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
     int hitId = -1; // --hit <playerId> <amount>: доложить серверу об уроне
     int hitAmount = 0;
     int dialogPick = -100; // --dialog <n>: авто-ответ на диалоги (пункт списка)
+    int pickupReportId = -1; // --pickup <id>: доложить о подборе пикапа
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--drive") drive = true;
         if (std::string(argv[i]) == "--damage") damage = true;
@@ -48,6 +49,8 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--dialog" && i + 1 < argc)
             dialogPick = std::atoi(argv[i + 1]);
+        if (std::string(argv[i]) == "--pickup" && i + 1 < argc)
+            pickupReportId = std::atoi(argv[i + 1]);
     }
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
@@ -83,6 +86,7 @@ int main(int argc, char** argv) {
     std::uint16_t myId = 0;
     int myWeapon = 0; // оружие от сервера (/gun); шлём в OnFootSync
     bool hitSent = false;
+    bool pickupSent = false;
     const std::uint64_t started = NowMs();
     std::uint64_t lastSync = 0;
     // Ходим туда-сюда перед особняком Версетти (ровная площадка, z ~17.3):
@@ -175,6 +179,30 @@ int main(int argc, char** argv) {
                                     resp.dialogId, resp.listItem);
                         std::fflush(stdout);
                     }
+                } else if (auto obj = vc::protocol::ParseCreateObject(payload)) {
+                    std::printf("[bot] объект id %u модель %u в (%.1f, %.1f, %.1f) "
+                                "rot (%.0f, %.0f, %.0f)\n",
+                                obj->objectId, obj->model,
+                                static_cast<double>(obj->position.x),
+                                static_cast<double>(obj->position.y),
+                                static_cast<double>(obj->position.z),
+                                static_cast<double>(obj->rotX),
+                                static_cast<double>(obj->rotY),
+                                static_cast<double>(obj->rotZ));
+                    std::fflush(stdout);
+                } else if (auto objOut = vc::protocol::ParseDestroyObject(payload)) {
+                    std::printf("[bot] объект id %u убран\n", *objOut);
+                    std::fflush(stdout);
+                } else if (auto pk = vc::protocol::ParseCreatePickup(payload)) {
+                    std::printf("[bot] пикап id %u модель %u тип %u в (%.1f, %.1f, %.1f)\n",
+                                pk->pickupId, pk->model, pk->type,
+                                static_cast<double>(pk->position.x),
+                                static_cast<double>(pk->position.y),
+                                static_cast<double>(pk->position.z));
+                    std::fflush(stdout);
+                } else if (auto pkOut = vc::protocol::ParseDestroyPickup(payload)) {
+                    std::printf("[bot] пикап id %u убран\n", *pkOut);
+                    std::fflush(stdout);
                 } else if (auto rej = vc::protocol::ParseConnectionRejected(payload)) {
                     std::printf("vc-bot: ОТКАЗ: %s\n", rej->c_str());
                     return 1;
@@ -200,6 +228,16 @@ int main(int argc, char** argv) {
                      {static_cast<std::uint16_t>(hitId), static_cast<float>(hitAmount), 26}),
                  vc::net::Reliability::ReliableOrdered, 0);
             std::printf("[bot] доложил урон: жертва %d, урон %d\n", hitId, hitAmount);
+            std::fflush(stdout);
+        }
+        // --pickup: один доклад о подборе пикапа после чата (тест цепочки).
+        if (accepted && chatSent && pickupReportId >= 0 && !pickupSent &&
+            NowMs() - started >= 2500) {
+            pickupSent = true;
+            send(vc::protocol::BuildPlayerPickup(
+                     static_cast<std::uint16_t>(pickupReportId)),
+                 vc::net::Reliability::ReliableOrdered, 0);
+            std::printf("[bot] доложил подбор пикапа %d\n", pickupReportId);
             std::fflush(stdout);
         }
         if (accepted && NowMs() - lastSync >= 100) {

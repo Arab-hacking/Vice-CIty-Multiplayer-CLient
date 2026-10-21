@@ -220,4 +220,43 @@ struct DialogResponseData {
 [[nodiscard]] std::optional<DialogResponseData> ParseDialogResponse(
     const std::vector<std::uint8_t>& payload);
 
+// Серверные объекты (протокол v11). CreateObject: [117][u16 objectId]
+// [u16 model][3f pos][3f rot] - вращение Эйлера в градусах (как SA-MP).
+struct ObjectSpawnData {
+    std::uint16_t objectId = 0;
+    std::uint16_t model = 0;
+    Vector3 position{};
+    float rotX = 0.0f;
+    float rotY = 0.0f;
+    float rotZ = 0.0f;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildCreateObject(const ObjectSpawnData& data);
+[[nodiscard]] std::optional<ObjectSpawnData> ParseCreateObject(
+    const std::vector<std::uint8_t>& payload);
+// DestroyObject: [118][u16 objectId].
+[[nodiscard]] std::vector<std::uint8_t> BuildDestroyObject(std::uint16_t objectId);
+[[nodiscard]] std::optional<std::uint16_t> ParseDestroyObject(
+    const std::vector<std::uint8_t>& payload);
+
+// Пикапы (протокол v11). CreatePickup: [119][u16 pickupId][u16 model]
+// [u8 type][3f pos]. Типы: 1 - многоразовый, 2 - одноразовый,
+// 3 - респавн через 10 с (логика на сервере).
+struct PickupSpawnData {
+    std::uint16_t pickupId = 0;
+    std::uint16_t model = 0;
+    std::uint8_t type = 1;
+    Vector3 position{};
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildCreatePickup(const PickupSpawnData& data);
+[[nodiscard]] std::optional<PickupSpawnData> ParseCreatePickup(
+    const std::vector<std::uint8_t>& payload);
+// DestroyPickup: [120][u16 pickupId].
+[[nodiscard]] std::vector<std::uint8_t> BuildDestroyPickup(std::uint16_t pickupId);
+[[nodiscard]] std::optional<std::uint16_t> ParseDestroyPickup(
+    const std::vector<std::uint8_t>& payload);
+// PlayerPickupPickup: [37][u16 pickupId] - клиент заметил подбор пикапа.
+[[nodiscard]] std::vector<std::uint8_t> BuildPlayerPickup(std::uint16_t pickupId);
+[[nodiscard]] std::optional<std::uint16_t> ParsePlayerPickup(
+    const std::vector<std::uint8_t>& payload);
+
 } // namespace vc::protocol

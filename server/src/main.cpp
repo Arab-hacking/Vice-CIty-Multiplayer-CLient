@@ -119,6 +119,8 @@ struct Session {
     std::uint8_t inVehicleSeat = 0; // 0 — водитель, 1..3 — пассажир
     std::set<std::uint16_t> streamedIn; // кого этот клиент сейчас «видит» (радиус-стриминг)
     std::set<std::uint16_t> streamedVehicles; // какие машины у него созданы
+    std::set<std::uint16_t> streamedObjects; // какие объекты у него созданы
+    std::set<std::uint16_t> streamedPickups; // какие пикапы у него созданы
     vc::Vector3 lastLoggedPosition{1e9f, 1e9f, 1e9f};
 };
 
@@ -157,6 +159,35 @@ struct ServerVehicle {
 };
 std::vector<ServerVehicle> g_vehicles;
 std::uint16_t g_nextVehicleId = 1;
+
+// Серверный объект (команда /obj, протокол v11): статичный CObject у клиентов,
+// стримится по радиусу как машины. Вращение - углы Эйлера в градусах.
+struct ServerObject {
+    std::uint16_t id = 0;
+    std::uint16_t model = 0;
+    std::uint16_t ownerId = 0;
+    vc::Vector3 position{};
+    float rotX = 0.0f;
+    float rotY = 0.0f;
+    float rotZ = 0.0f;
+};
+std::vector<ServerObject> g_objects;
+std::uint16_t g_nextObjectId = 1;
+
+// Серверный пикап (команда /pickup, протокол v11). Типы: 1 - многоразовый,
+// 2 - одноразовый, 3 - респавн через 10 с (hiddenUntilMs прячет от стрима).
+// weaponId != 0: подобравшему выдаётся оружие (eWeaponType, 1..36).
+struct ServerPickup {
+    std::uint16_t id = 0;
+    std::uint16_t model = 0;
+    std::uint16_t ownerId = 0;
+    std::uint8_t type = 1;
+    vc::Vector3 position{};
+    int weaponId = 0;
+    std::uint64_t hiddenUntilMs = 0;
+};
+std::vector<ServerPickup> g_pickups;
+std::uint16_t g_nextPickupId = 1;
 
 std::string KeyOf(const vc::net::Endpoint& ep) {
     return ep.ip + ":" + std::to_string(ep.port);
@@ -273,6 +304,58 @@ void StreamTick(vc::net::UdpSocket& socket, std::map<std::string, Session>& sess
                 Send(socket, session, vc::protocol::BuildVehicleStreamOut(id),
                      vc::net::Reliability::ReliableOrdered, 0);
         session.streamedVehicles = desiredVehicles;
+
+        // Объекты и пикапы стримятся тем же радиусом; пикапы типа 3 на
+        // респавне (NowMs < hiddenUntilMs) из стрима выпадают.
+        std::set<std::uint16_t> desiredObjects;
+        for (const auto& o : g_objects) {
+            const float dx = o.position.x - session.position.x;
+            const float dy = o.position.y - session.position.y;
+            const float dz = o.position.z - session.position.z;
+            if (dx * dx + dy * dy + dz * dz <= kStreamRadius * kStreamRadius)
+                desiredObjects.insert(o.id);
+        }
+        for (std::uint16_t id : desiredObjects) {
+            if (session.streamedObjects.contains(id)) continue;
+            const auto it = std::find_if(g_objects.begin(), g_objects.end(),
+                                         [&](const ServerObject& o) { return o.id == id; });
+            if (it != g_objects.end())
+                Send(socket, session,
+                     vc::protocol::BuildCreateObject(
+                         {it->id, it->model, it->position, it->rotX, it->rotY, it->rotZ}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        }
+        for (std::uint16_t id : session.streamedObjects)
+            if (!desiredObjects.contains(id))
+                Send(socket, session, vc::protocol::BuildDestroyObject(id),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        session.streamedObjects = desiredObjects;
+
+        std::set<std::uint16_t> desiredPickups;
+        const std::uint64_t nowMs = NowMs();
+        for (const auto& p : g_pickups) {
+            if (nowMs < p.hiddenUntilMs) continue; // респавн-таймер (тип 3)
+            const float dx = p.position.x - session.position.x;
+            const float dy = p.position.y - session.position.y;
+            const float dz = p.position.z - session.position.z;
+            if (dx * dx + dy * dy + dz * dz <= kStreamRadius * kStreamRadius)
+                desiredPickups.insert(p.id);
+        }
+        for (std::uint16_t id : desiredPickups) {
+            if (session.streamedPickups.contains(id)) continue;
+            const auto it = std::find_if(g_pickups.begin(), g_pickups.end(),
+                                         [&](const ServerPickup& p) { return p.id == id; });
+            if (it != g_pickups.end())
+                Send(socket, session,
+                     vc::protocol::BuildCreatePickup(
+                         {it->id, it->model, it->type, it->position}),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        }
+        for (std::uint16_t id : session.streamedPickups)
+            if (!desiredPickups.contains(id))
+                Send(socket, session, vc::protocol::BuildDestroyPickup(id),
+                     vc::net::Reliability::ReliableOrdered, 0);
+        session.streamedPickups = desiredPickups;
     }
 }
 
@@ -388,7 +471,8 @@ void ShowMainMenu(vc::net::UdpSocket& socket, Session& session) {
 }
 
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
-// Команды: /help, /mm, /bot, /dbot, /unbot, /car, /delcar, /skin, /gun, /tp, /kill, /pos, /players.
+// Команды: /help, /mm, /bot, /dbot, /unbot, /car, /delcar, /skin, /gun, /tp,
+// /kill, /pos, /players, /obj, /delobj, /pickup, /delpickup.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId, const std::string& text) {
     auto reply = [&](const std::string& msg) {
@@ -408,6 +492,8 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
         reply("/kill - респавн, /pos - координаты, /players - онлайн");
         reply("/mm - главное меню (статистика, телепорты, оружие, транспорт)");
+        reply("/obj <модель> [rx ry rz] - объект перед тобой, /delobj [id] - убрать");
+        reply("/pickup <модель> [тип 1-3] [оружие] - пикап, /delpickup [id] - убрать");
     } else if (cmd == "/bot") {
         if (!session.hasPosition) {
             reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /bot");
@@ -613,6 +699,104 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         std::printf("[server] Игрок %s получил оружие id %d (патронов %d)\n",
                     session.nick.c_str(), gunId, gunAmmo);
         std::fflush(stdout);
+    } else if (cmd == "/obj") {
+        if (!session.hasPosition) {
+            reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /obj");
+            return;
+        }
+        int model = 0;
+        if (!(ss >> model) || model < 0 || model > 20000) {
+            reply("Использование: /obj <модель> [rx ry rz], например /obj 141 (кузов Infernus)");
+            return;
+        }
+        float rx = 0.0f, ry = 0.0f, rz = 0.0f;
+        ss >> rx >> ry >> rz; // опциональные углы Эйлера в градусах
+        ServerObject object;
+        object.id = g_nextObjectId++;
+        object.model = static_cast<std::uint16_t>(model);
+        object.ownerId = session.playerId;
+        object.position = {session.position.x + session.moveDirX * 6.0f,
+                           session.position.y + session.moveDirY * 6.0f,
+                           session.position.z};
+        object.rotX = rx;
+        object.rotY = ry;
+        object.rotZ = rz;
+        g_objects.push_back(object);
+        StreamTick(socket, sessions); // объект появится сразу
+        reply("Объект id " + std::to_string(object.id) + " (модель " +
+              std::to_string(model) + ") создан перед тобой. /delobj [id] - убрать");
+        std::printf("[server] Создан объект id %u (модель %d) для %s\n", object.id, model,
+                    session.nick.c_str());
+        std::fflush(stdout);
+    } else if (cmd == "/delobj") {
+        int idArg = 0;
+        const bool hasId = static_cast<bool>(ss >> idArg);
+        auto it = g_objects.end();
+        for (auto i = g_objects.begin(); i != g_objects.end(); ++i)
+            if (i->ownerId == session.playerId &&
+                (!hasId || i->id == static_cast<std::uint16_t>(idArg)))
+                it = i; // без id - последний свой
+        if (it == g_objects.end()) {
+            reply(hasId ? "Объект с таким id не найден" : "У тебя нет объектов");
+            return;
+        }
+        const std::uint16_t removedId = it->id;
+        g_objects.erase(it);
+        StreamTick(socket, sessions);
+        reply("Объект id " + std::to_string(removedId) + " убран");
+    } else if (cmd == "/pickup") {
+        if (!session.hasPosition) {
+            reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /pickup");
+            return;
+        }
+        int model = 0;
+        if (!(ss >> model) || model < 0 || model > 20000) {
+            reply("Использование: /pickup <модель> [тип 1-3] [id оружия], "
+                  "например /pickup 262 2 26");
+            return;
+        }
+        int type = 1;
+        ss >> type;
+        if (type < 1) type = 1;
+        if (type > 3) type = 3;
+        int weaponId = 0;
+        ss >> weaponId;
+        if (weaponId < 0) weaponId = 0;
+        if (weaponId > 36) weaponId = 36;
+        ServerPickup pickup;
+        pickup.id = g_nextPickupId++;
+        pickup.model = static_cast<std::uint16_t>(model);
+        pickup.ownerId = session.playerId;
+        pickup.type = static_cast<std::uint8_t>(type);
+        pickup.position = {session.position.x + session.moveDirX * 3.0f,
+                           session.position.y + session.moveDirY * 3.0f,
+                           session.position.z};
+        pickup.weaponId = weaponId;
+        g_pickups.push_back(pickup);
+        StreamTick(socket, sessions); // пикап появится сразу
+        reply("Пикап id " + std::to_string(pickup.id) + " (модель " +
+              std::to_string(model) + ", тип " + std::to_string(type) +
+              (weaponId != 0 ? ", оружие " + std::to_string(weaponId) : "") +
+              ") создан. Подойди вплотную, чтобы подобрать. /delpickup [id]");
+        std::printf("[server] Создан пикап id %u (модель %d, тип %d, оружие %d) для %s\n",
+                    pickup.id, model, type, weaponId, session.nick.c_str());
+        std::fflush(stdout);
+    } else if (cmd == "/delpickup") {
+        int idArg = 0;
+        const bool hasId = static_cast<bool>(ss >> idArg);
+        auto it = g_pickups.end();
+        for (auto i = g_pickups.begin(); i != g_pickups.end(); ++i)
+            if (i->ownerId == session.playerId &&
+                (!hasId || i->id == static_cast<std::uint16_t>(idArg)))
+                it = i; // без id - последний свой
+        if (it == g_pickups.end()) {
+            reply(hasId ? "Пикап с таким id не найден" : "У тебя нет пикапов");
+            return;
+        }
+        const std::uint16_t removedId = it->id;
+        g_pickups.erase(it);
+        StreamTick(socket, sessions);
+        reply("Пикап id " + std::to_string(removedId) + " убран");
     } else if (cmd == "/mm") {
         ShowMainMenu(socket, session);
     } else {
@@ -925,6 +1109,50 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
     if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::DialogResponse)) {
         if (const auto resp = vc::protocol::ParseDialogResponse(payload))
             HandleDialogResponse(socket, sessions, session, *resp);
+        return false;
+    }
+
+    // Игрок подошёл к пикапу: событие в общий чат (видит и владелец),
+    // опциональная выдача оружия, тип 2 стирается, тип 3 прячется на 10 с.
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::PlayerPickupPickup)) {
+        if (const auto pickupId = vc::protocol::ParsePlayerPickup(payload)) {
+            const auto it = std::find_if(g_pickups.begin(), g_pickups.end(),
+                                         [&](const ServerPickup& p) {
+                                             return p.id == *pickupId;
+                                         });
+            if (it != g_pickups.end() && NowMs() >= it->hiddenUntilMs) {
+                const ServerPickup pickup = *it;
+                const float dx = pickup.position.x - session.position.x;
+                const float dy = pickup.position.y - session.position.y;
+                const float dz = pickup.position.z - session.position.z;
+                std::printf("[pickup] %s подобрал пикап id %u (модель %u, тип %u, "
+                            "дистанция %.1f м)\n",
+                            session.nick.c_str(), pickup.id, pickup.model, pickup.type,
+                            std::sqrt(dx * dx + dy * dy + dz * dz));
+                std::fflush(stdout);
+                const std::string notice = session.nick + " подобрал пикап id " +
+                                           std::to_string(pickup.id) + " (модель " +
+                                           std::to_string(pickup.model) + ")";
+                for (auto& [key, other] : sessions)
+                    if (other.joined)
+                        Send(socket, other, vc::protocol::BuildServerMessage(notice),
+                             vc::net::Reliability::ReliableOrdered, 0);
+                if (pickup.weaponId >= 1 && pickup.weaponId <= 36) {
+                    Send(socket, session,
+                         vc::protocol::BuildGiveWeapon(
+                             {static_cast<std::uint8_t>(pickup.weaponId), 500}),
+                         vc::net::Reliability::ReliableOrdered, 0);
+                    for (auto& bot : g_bots)
+                        if (bot.ownerId == session.playerId)
+                            bot.weapon = static_cast<std::uint8_t>(pickup.weaponId);
+                }
+                if (pickup.type == 2)
+                    g_pickups.erase(it); // одноразовый
+                else if (pickup.type == 3)
+                    it->hiddenUntilMs = NowMs() + 10000; // респавн через 10 с
+                StreamTick(socket, sessions);
+            }
+        }
         return false;
     }
 

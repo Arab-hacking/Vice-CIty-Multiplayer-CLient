@@ -290,6 +290,21 @@ void TestCodec() {
     const auto dr2 = vc::protocol::ParseDialogResponse(
         vc::protocol::BuildDialogResponse({9, 0, -1, ""}));
     CHECK(dr2 && dr2->response == 0 && dr2->listItem == -1 && dr2->inputText.empty());
+
+    // Серверные объекты и пикапы (протокол v11).
+    const auto co = vc::protocol::BuildCreateObject(
+        {5, 141, {1.0f, 2.0f, 3.0f}, 10.0f, 20.0f, 30.0f});
+    const auto parsedCo = vc::protocol::ParseCreateObject(co);
+    CHECK(parsedCo && parsedCo->objectId == 5 && parsedCo->model == 141 &&
+          parsedCo->position.y == 2.0f && parsedCo->rotX == 10.0f &&
+          parsedCo->rotZ == 30.0f);
+    CHECK(vc::protocol::ParseDestroyObject(vc::protocol::BuildDestroyObject(5)) == 5);
+    const auto cp = vc::protocol::BuildCreatePickup({3, 262, 2, {4.0f, 5.0f, 6.0f}});
+    const auto parsedCp = vc::protocol::ParseCreatePickup(cp);
+    CHECK(parsedCp && parsedCp->pickupId == 3 && parsedCp->model == 262 &&
+          parsedCp->type == 2 && parsedCp->position.z == 6.0f);
+    CHECK(vc::protocol::ParseDestroyPickup(vc::protocol::BuildDestroyPickup(3)) == 3);
+    CHECK(vc::protocol::ParsePlayerPickup(vc::protocol::BuildPlayerPickup(3)) == 3);
 }
 
 } // namespace

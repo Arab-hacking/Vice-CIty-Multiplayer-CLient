@@ -502,4 +502,110 @@ std::optional<DialogResponseData> ParseDialogResponse(
     return data;
 }
 
+std::vector<std::uint8_t> BuildCreateObject(const ObjectSpawnData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::CreateObject));
+    w.U16(data.objectId);
+    w.U16(data.model);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    w.F32(data.rotX);
+    w.F32(data.rotY);
+    w.F32(data.rotZ);
+    return w.out;
+}
+
+std::optional<ObjectSpawnData> ParseCreateObject(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::CreateObject)))
+        return std::nullopt;
+    ObjectSpawnData data;
+    data.objectId = r.U16();
+    data.model = r.U16();
+    data.position.x = r.F32();
+    data.position.y = r.F32();
+    data.position.z = r.F32();
+    data.rotX = r.F32();
+    data.rotY = r.F32();
+    data.rotZ = r.F32();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildDestroyObject(std::uint16_t objectId) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::DestroyObject));
+    w.U16(objectId);
+    return w.out;
+}
+
+std::optional<std::uint16_t> ParseDestroyObject(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::DestroyObject)))
+        return std::nullopt;
+    const std::uint16_t id = r.U16();
+    if (!r.ok) return std::nullopt;
+    return id;
+}
+
+std::vector<std::uint8_t> BuildCreatePickup(const PickupSpawnData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::CreatePickup));
+    w.U16(data.pickupId);
+    w.U16(data.model);
+    w.U8(data.type);
+    w.F32(data.position.x);
+    w.F32(data.position.y);
+    w.F32(data.position.z);
+    return w.out;
+}
+
+std::optional<PickupSpawnData> ParseCreatePickup(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::CreatePickup)))
+        return std::nullopt;
+    PickupSpawnData data;
+    data.pickupId = r.U16();
+    data.model = r.U16();
+    data.type = r.U8();
+    data.position.x = r.F32();
+    data.position.y = r.F32();
+    data.position.z = r.F32();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildDestroyPickup(std::uint16_t pickupId) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::DestroyPickup));
+    w.U16(pickupId);
+    return w.out;
+}
+
+std::optional<std::uint16_t> ParseDestroyPickup(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::DestroyPickup)))
+        return std::nullopt;
+    const std::uint16_t id = r.U16();
+    if (!r.ok) return std::nullopt;
+    return id;
+}
+
+std::vector<std::uint8_t> BuildPlayerPickup(std::uint16_t pickupId) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ClientPacket::PlayerPickupPickup));
+    w.U16(pickupId);
+    return w.out;
+}
+
+std::optional<std::uint16_t> ParsePlayerPickup(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ClientPacket::PlayerPickupPickup)))
+        return std::nullopt;
+    const std::uint16_t id = r.U16();
+    if (!r.ok) return std::nullopt;
+    return id;
+}
+
 } // namespace vc::protocol

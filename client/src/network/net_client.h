@@ -92,6 +92,27 @@ public:
     };
     [[nodiscard]] std::vector<RemoteVehicle> RemoteVehicles() const;
 
+    // Серверные объекты и пикапы в стриме (игровой поток рисует ObjectPool).
+    struct RemoteObject {
+        std::uint16_t id = 0;
+        std::uint16_t model = 0;
+        vc::Vector3 position{};
+        float rotX = 0.0f;
+        float rotY = 0.0f;
+        float rotZ = 0.0f;
+    };
+    [[nodiscard]] std::vector<RemoteObject> RemoteObjects() const;
+
+    struct RemotePickup {
+        std::uint16_t id = 0;
+        std::uint16_t model = 0;
+        std::uint8_t type = 1;
+        vc::Vector3 position{};
+    };
+    [[nodiscard]] std::vector<RemotePickup> RemotePickups() const;
+    // Игровой поток докладывает: локальный игрок подошёл к пикапу вплотную.
+    void ReportPickup(std::uint16_t pickupId);
+
     // Локальный игрок за рулём серверной машины: поза уходит на сервер 10 Гц.
     struct LocalVehicleState {
         std::uint16_t vehicleId = 0;
@@ -151,6 +172,9 @@ private:
     std::uint8_t m_latestWeapon = 0;
     std::map<std::uint16_t, RemotePlayer> m_remotePlayers;
     std::map<std::uint16_t, RemoteVehicle> m_remoteVehicles;
+    std::map<std::uint16_t, RemoteObject> m_remoteObjects;
+    std::map<std::uint16_t, RemotePickup> m_remotePickups;
+    std::vector<std::uint16_t> m_pickupOutbox;
     // playerId -> (vehicleId, seat) из VehicleOccupant (может прийти раньше
     // StreamIn игрока, поэтому отдельная карта).
     std::map<std::uint16_t, std::pair<std::uint16_t, std::uint8_t>> m_occupancy;

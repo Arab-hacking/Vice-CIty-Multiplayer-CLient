@@ -21,6 +21,7 @@
 #include "../../core/seh_guard.h"
 #include "../../network/net_client.h"
 #include "../../pools/player_pool.h"
+#include "../../pools/object_pool.h"
 #include "../../pools/vehicle_pool.h"
 #include "../../render/overlay.h"
 #include "../revc.h"
@@ -285,6 +286,7 @@ void OnFrameAfterOriginal() {
         position, health, static_cast<std::uint8_t>(currentWeapon));
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
+    vc::pools::ObjectPool::Instance().Tick();  // серверные объекты и пикапы
 
     // G — сесть пассажиром в ближайшую серверную машину / выйти из неё (как
     // в SA-MP; в самой VC посадки пассажиром нет). Фактическое место следом

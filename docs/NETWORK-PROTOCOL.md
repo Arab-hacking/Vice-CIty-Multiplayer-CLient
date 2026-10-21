@@ -76,6 +76,7 @@ align до байта, тело пакета         игровые пакеты
 | `Disconnect` (34) | К→С | Unreliable/0 | пустой — сервер сразу закрывает сессию (иначе по таймауту 15 с) |
 | `PlayerDamage` (35) | К→С | ReliableOrdered/0 | `u16 victimId, f32 amount, u8 weapon` — клиент стрелка заметил падение HP педа-куклы и докладывает серверу; сервер шлёт жертве `TakeDamage` (v9) |
 | `DialogResponse` (36) | К→С | ReliableOrdered/0 | `u16 dialogId, u8 response, i16 listItem, Str16 inputText` — ответ на `ShowDialog`, семантика SA-MP OnDialogResponse: response 1 — первая кнопка/Enter, 0 — вторая/Esc, listItem -1 — не выбрано (v10) |
+| `PlayerPickupPickup` (37) | К→С | ReliableOrdered/0 | `u16 pickupId` — клиент заметил, что локальный игрок подошёл к пикапу вплотную (<2 м); сервер пишет в общий чат, опционально выдаёт оружие и применяет тип пикапа (v11) |
 
 Сеть клиента работает в отдельном потоке: пауза/Alt-Tab/загрузка игры соединение не рвут.
 Игровой поток только публикует свежую позицию (`SetPlayerPosition`).
@@ -99,6 +100,10 @@ align до байта, тело пакета         игровые пакеты
 | `GiveWeapon` (114) | С→К | ReliableOrdered/0 | `u8 weapon, u16 ammo` — сервер выдаёт оружие (команда `/gun <id> [патроны]`); клиент применяет через `CPed::GiveWeapon`+`SetCurrentWeapon` (v9) |
 | `TakeDamage` (115) | С→К | ReliableOrdered/0 | `u16 attackerId, f32 amount, u8 weapon` — сервер велит жертве вычесть HP (v9) |
 | `ShowDialog` (116) | С→К | ReliableOrdered/0 | `u16 dialogId, u8 style, Str16 caption, Str16 info, Str16 button1, Str16 button2` — диалог в стиле SA-MP (стили 0-5: MsgBox/Input/List/Password/TabList/TabListHeaders; строки - `\n`, колонки - `\t`, цвета `{RRGGBB}`); команда `/mm` (v10) |
+| `CreateObject` (117) | С→К | ReliableOrdered/0 | `u16 objectId, u16 model, f32 x,y,z, f32 rotX,rotY,rotZ` — серверный объект вошёл в радиус стриминга; вращение — углы Эйлера в градусах (команда `/obj`, v11) |
+| `DestroyObject` (118) | С→К | ReliableOrdered/0 | `u16 objectId` — убрать серверный объект (v11) |
+| `CreatePickup` (119) | С→К | ReliableOrdered/0 | `u16 pickupId, u16 model, u8 type, f32 x,y,z` — серверный пикап в радиусе стриминга; типы: 1 — многоразовый, 2 — одноразовый, 3 — респавн через 10 с (команда `/pickup`, v11) |
+| `DestroyPickup` (120) | С→К | ReliableOrdered/0 | `u16 pickupId` — убрать пикап (v11) |
 | `Teleport` (132) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill`/респавн после смерти; клиент применяет, когда мир готов и пед жив |
 | `Death` (31) | К→С | ReliableOrdered/0 | без тела — клиент заметил HP<=0; сервер прячет куклу и шлёт Teleport на спавн, по первому синку с HP>0 игрок снова в стриме |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |

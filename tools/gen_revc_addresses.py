@@ -67,6 +67,8 @@ CURATED = [
     ("kCPedSetMoveState", "?SetMoveState@CPed@@QEAAXW4eMoveState@@@Z", "void CPed::SetMoveState(eMoveState) — анимация ходьбы/бега куклы (следующий шаг)"),
     ("kCEntityUpdateRwFrame", "?UpdateRwFrame@CEntity@@QEAAXXZ", "void CEntity::UpdateRwFrame() — пересчёт матрицы Rw-клампа (без него модель не едет за позицией)"),
     ("kCPedSetMoveAnim", "?SetMoveAnim@CPed@@UEAAXXZ", "void CPed::SetMoveAnim() — применяет анимацию по m_nMoveState (сам проверяет смену)"),
+    ("kCObjectCtor", "??0CObject@@QEAA@H_N@Z", "CObject::CObject(int32 model, bool createRW) — конструктор серверного объекта/пикапа"),
+    ("kCPoolObjectNew", "?New@?$CPool@VCObject@@VCCutsceneObject@@@@QEAAPEAVCObject@@XZ", "CPool<CObject>::New() — слот пула объектов"),
 ]
 
 

@@ -187,6 +187,28 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles.erase(*vehicleOut);
         Log("net: stream-out машины id " + std::to_string(*vehicleOut) + "\n");
+    } else if (auto objectIn = vc::protocol::ParseCreateObject(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remoteObjects[objectIn->objectId] = RemoteObject{
+            objectIn->objectId, objectIn->model, objectIn->position,
+            objectIn->rotX, objectIn->rotY, objectIn->rotZ};
+        Log("net: объект id " + std::to_string(objectIn->objectId) + " (модель " +
+            std::to_string(objectIn->model) + ") в стриме\n");
+    } else if (auto objectOut = vc::protocol::ParseDestroyObject(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remoteObjects.erase(*objectOut);
+        Log("net: объект id " + std::to_string(*objectOut) + " убран\n");
+    } else if (auto pickupIn = vc::protocol::ParseCreatePickup(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remotePickups[pickupIn->pickupId] = RemotePickup{
+            pickupIn->pickupId, pickupIn->model, pickupIn->type, pickupIn->position};
+        Log("net: пикап id " + std::to_string(pickupIn->pickupId) + " (модель " +
+            std::to_string(pickupIn->model) + ", тип " +
+            std::to_string(pickupIn->type) + ") в стриме\n");
+    } else if (auto pickupOut = vc::protocol::ParseDestroyPickup(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_remotePickups.erase(*pickupOut);
+        Log("net: пикап id " + std::to_string(*pickupOut) + " убран\n");
     } else if (auto occ = vc::protocol::ParseVehicleOccupant(payload)) {
         std::lock_guard lock(m_mutex);
         if (occ->seat == vc::protocol::kSeatVacated)
@@ -290,6 +312,27 @@ std::vector<NetClient::RemoteVehicle> NetClient::RemoteVehicles() const {
     out.reserve(m_remoteVehicles.size());
     for (const auto& [id, remote] : m_remoteVehicles) out.push_back(remote);
     return out;
+}
+
+std::vector<NetClient::RemoteObject> NetClient::RemoteObjects() const {
+    std::lock_guard lock(m_mutex);
+    std::vector<RemoteObject> out;
+    out.reserve(m_remoteObjects.size());
+    for (const auto& [id, remote] : m_remoteObjects) out.push_back(remote);
+    return out;
+}
+
+std::vector<NetClient::RemotePickup> NetClient::RemotePickups() const {
+    std::lock_guard lock(m_mutex);
+    std::vector<RemotePickup> out;
+    out.reserve(m_remotePickups.size());
+    for (const auto& [id, remote] : m_remotePickups) out.push_back(remote);
+    return out;
+}
+
+void NetClient::ReportPickup(std::uint16_t pickupId) {
+    std::lock_guard lock(m_mutex);
+    m_pickupOutbox.push_back(pickupId);
 }
 
 void NetClient::ThreadMain() {
@@ -407,6 +450,19 @@ void NetClient::ThreadMain() {
             if (m_state.load() == State::Connected)
                 for (const auto& d : outbox)
                     SendPayloadLockedPeer(vc::protocol::BuildDialogResponse(d),
+                                          vc::net::Reliability::ReliableOrdered, 0, now);
+        }
+
+        // Рапорты о подборе пикапов из игрового потока (ObjectPool).
+        {
+            std::vector<std::uint16_t> outbox;
+            {
+                std::lock_guard lock(m_mutex);
+                outbox.swap(m_pickupOutbox);
+            }
+            if (m_state.load() == State::Connected)
+                for (std::uint16_t id : outbox)
+                    SendPayloadLockedPeer(vc::protocol::BuildPlayerPickup(id),
                                           vc::net::Reliability::ReliableOrdered, 0, now);
         }
 

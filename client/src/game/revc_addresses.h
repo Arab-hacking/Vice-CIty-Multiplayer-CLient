@@ -145,4 +145,10 @@ inline constexpr std::uintptr_t kCEntityUpdateRwFrame = 0x001524F0u;
 // void CPed::SetMoveAnim() — применяет анимацию по m_nMoveState (сам проверяет смену)
 inline constexpr std::uintptr_t kCPedSetMoveAnim = 0x001F92A0u;
 
+// CObject::CObject(int32 model, bool createRW) — конструктор серверного объекта/пикапа
+inline constexpr std::uintptr_t kCObjectCtor = 0x001D2730u;
+
+// CPool<CObject>::New() — слот пула объектов
+inline constexpr std::uintptr_t kCPoolObjectNew = 0x001D3510u;
+
 } // namespace vc::game::revc
