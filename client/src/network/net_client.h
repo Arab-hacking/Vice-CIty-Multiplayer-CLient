@@ -54,6 +54,10 @@ public:
     [[nodiscard]] std::vector<PendingDamage> TakePendingDamage();
     // Игровой поток докладывает о попадании по кукле (PlayerDamage на сервер).
     void ReportDamage(std::uint16_t victimId, float amount);
+    // Диалог от сервера (RPC ShowDialog, стиль SA-MP): оверлей забирает и
+    // показывает окно; ответ игрока уходит через SendDialogResponse.
+    [[nodiscard]] std::optional<vc::protocol::ShowDialogData> TakePendingDialog();
+    void SendDialogResponse(const vc::protocol::DialogResponseData& data);
 
     [[nodiscard]] State GetState() const { return m_state.load(); }
     [[nodiscard]] std::uint16_t PlayerId() const { return m_playerId.load(); }
@@ -156,6 +160,8 @@ private:
     std::vector<vc::protocol::GiveWeaponData> m_pendingGiveWeapons;
     std::vector<PendingDamage> m_pendingDamage;
     std::vector<vc::protocol::PlayerDamageData> m_damageOutbox;
+    std::optional<vc::protocol::ShowDialogData> m_pendingDialog;
+    std::vector<vc::protocol::DialogResponseData> m_dialogOutbox;
     std::atomic<bool> m_deathPending{false};
 };
 

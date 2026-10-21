@@ -365,8 +365,30 @@ void RemoveVehiclesOf(vc::net::UdpSocket& socket, std::map<std::string, Session>
     if (!removed.empty()) std::fflush(stdout);
 }
 
+// Диалоги в стиле SA-MP (протокол v10): сервер показывает игроку окно
+// (ShowDialog), клиент отвечает DialogResponse. ID наших встроенных меню:
+constexpr std::uint16_t kDlgMainMenu = 1;
+constexpr std::uint16_t kDlgStats = 2;
+constexpr std::uint16_t kDlgTeleports = 3;
+constexpr std::uint16_t kDlgWeapons = 4;
+constexpr std::uint16_t kDlgVehicles = 5;
+constexpr std::uint16_t kDlgHelp = 6;
+
+void SendDialog(vc::net::UdpSocket& socket, Session& session,
+                const vc::protocol::ShowDialogData& data) {
+    Send(socket, session, vc::protocol::BuildShowDialog(data),
+         vc::net::Reliability::ReliableOrdered, 0);
+}
+
+void ShowMainMenu(vc::net::UdpSocket& socket, Session& session) {
+    SendDialog(socket, session,
+               {kDlgMainMenu, static_cast<std::uint8_t>(vc::protocol::DialogStyle::List),
+                "Главное меню", "Статистика\nТелепорты\nОружие\nТранспорт\nПомощь",
+                "Выбрать", "Закрыть"});
+}
+
 // Чат-команды (текст начинается с '/'): не ретранслируются, а выполняются сервером.
-// Команды: /help, /bot, /dbot, /unbot, /car, /delcar, /skin, /gun, /tp, /kill, /pos, /players.
+// Команды: /help, /mm, /bot, /dbot, /unbot, /car, /delcar, /skin, /gun, /tp, /kill, /pos, /players.
 void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& sessions,
                    Session& session, std::uint16_t& nextPlayerId, const std::string& text) {
     auto reply = [&](const std::string& msg) {
@@ -385,6 +407,7 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         reply("/gun <id 1-36> [патроны] - оружие себе (и боту): 17 Colt, 25 MP5, 26 M4");
         reply("/skin <id 0-130> - модель педа, /tp <x> <y> <z> - телепорт");
         reply("/kill - респавн, /pos - координаты, /players - онлайн");
+        reply("/mm - главное меню (статистика, телепорты, оружие, транспорт)");
     } else if (cmd == "/bot") {
         if (!session.hasPosition) {
             reply("Позиция ещё неизвестна: сделай пару шагов в игре и повтори /bot");
@@ -590,8 +613,135 @@ void HandleCommand(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
         std::printf("[server] Игрок %s получил оружие id %d (патронов %d)\n",
                     session.nick.c_str(), gunId, gunAmmo);
         std::fflush(stdout);
+    } else if (cmd == "/mm") {
+        ShowMainMenu(socket, session);
     } else {
         reply("Неизвестная команда. /help - список команд");
+    }
+}
+
+// Ответ игрока на диалог (аналог OnDialogResponse в SA-MP): response 1 -
+// первая кнопка/Enter, 0 - вторая/Esc, listItem -1 - ничего не выбрано.
+void HandleDialogResponse(vc::net::UdpSocket& socket,
+                          std::map<std::string, Session>& sessions, Session& session,
+                          const vc::protocol::DialogResponseData& resp) {
+    std::printf("[dialog] %s: id=%u response=%u listitem=%d input='%s'\n",
+                session.nick.c_str(), resp.dialogId, resp.response,
+                static_cast<int>(resp.listItem), resp.inputText.c_str());
+    std::fflush(stdout);
+    using vc::protocol::DialogStyle;
+    auto style = [](DialogStyle s) { return static_cast<std::uint8_t>(s); };
+    switch (resp.dialogId) {
+    case kDlgMainMenu: {
+        if (resp.response != 1) return;
+        if (resp.listItem == 0) {
+            const std::string vehicle =
+                session.inVehicleId > 0
+                    ? "машина id " + std::to_string(session.inVehicleId) +
+                          ", место " + std::to_string(session.inVehicleSeat)
+                    : "пешком";
+            char buf[512];
+            std::snprintf(buf, sizeof(buf),
+                          "{FFCC00}Статистика игрока\n\n"
+                          "{FFFFFF}Ник: %s\nID: %u\nHP: %u\nОружие в руках: id %u\n"
+                          "Позиция: %.1f, %.1f, %.1f\nТранспорт: %s",
+                          session.nick.c_str(), session.playerId, session.health,
+                          session.weapon, session.position.x, session.position.y,
+                          session.position.z, vehicle.c_str());
+            SendDialog(socket, session,
+                       {kDlgStats, style(DialogStyle::MsgBox), "Статистика", buf, "Назад",
+                        "Закрыть"});
+        } else if (resp.listItem == 1) {
+            SendDialog(socket, session,
+                       {kDlgTeleports, style(DialogStyle::List), "Телепорты",
+                        "Спавн\nАэропорт\nПляж\nДаунтаун", "Выбрать", "Назад"});
+        } else if (resp.listItem == 2) {
+            SendDialog(socket, session,
+                       {kDlgWeapons, style(DialogStyle::List), "Оружие",
+                        "Colt 45\nShotgun\nMP5\nM4\nSniper Rifle\nMinigun", "Выбрать",
+                        "Назад"});
+        } else if (resp.listItem == 3) {
+            SendDialog(socket, session,
+                       {kDlgVehicles, style(DialogStyle::List), "Транспорт",
+                        "Infernus\nCheetah\nSentinel\nTaxi", "Выбрать", "Назад"});
+        } else if (resp.listItem == 4) {
+            SendDialog(socket, session,
+                       {kDlgHelp, style(DialogStyle::MsgBox), "Помощь",
+                        "{FFCC00}Команды сервера\n\n{FFFFFF}/mm - главное меню\n"
+                        "/bot, /dbot, /unbot - тестовые боты\n"
+                        "/car [модель], /delcar - машина\n"
+                        "/gun <id> [патроны] - оружие\n"
+                        "/skin <id> - модель педа\n"
+                        "/tp <x> <y> <z> - телепорт\n"
+                        "/kill, /pos, /players, /help",
+                        "Назад", "Закрыть"});
+        }
+        break;
+    }
+    case kDlgStats:
+    case kDlgHelp:
+        if (resp.response == 1) ShowMainMenu(socket, session);
+        break;
+    case kDlgTeleports: {
+        if (resp.response != 1) {
+            ShowMainMenu(socket, session);
+            break;
+        }
+        static constexpr vc::Vector3 kSpots[4] = {
+            {-378.5f, -589.1f, 26.6f}, {-1515.0f, -955.0f, 10.5f},
+            {230.0f, -1275.0f, 12.5f}, {-470.0f, 665.0f, 12.5f}};
+        if (resp.listItem < 0 || resp.listItem > 3) break;
+        session.position = kSpots[resp.listItem];
+        session.hasPosition = true;
+        Send(socket, session, vc::protocol::BuildTeleport({session.position, 0.0f}),
+             vc::net::Reliability::ReliableOrdered, 0);
+        break;
+    }
+    case kDlgWeapons: {
+        if (resp.response != 1) {
+            ShowMainMenu(socket, session);
+            break;
+        }
+        static constexpr int kGuns[6] = {17, 19, 25, 26, 28, 33};
+        if (resp.listItem < 0 || resp.listItem > 5) break;
+        const int gunId = kGuns[resp.listItem];
+        Send(socket, session,
+             vc::protocol::BuildGiveWeapon(
+                 {static_cast<std::uint8_t>(gunId), static_cast<std::uint16_t>(500)}),
+             vc::net::Reliability::ReliableOrdered, 0);
+        for (auto& bot : g_bots)
+            if (bot.ownerId == session.playerId)
+                bot.weapon = static_cast<std::uint8_t>(gunId);
+        std::printf("[server] Игрок %s получил оружие id %d через /mm\n",
+                    session.nick.c_str(), gunId);
+        std::fflush(stdout);
+        break;
+    }
+    case kDlgVehicles: {
+        if (resp.response != 1) {
+            ShowMainMenu(socket, session);
+            break;
+        }
+        static constexpr int kModels[4] = {141, 145, 135, 150};
+        if (resp.listItem < 0 || resp.listItem > 3 || !session.hasPosition) break;
+        RemoveVehiclesOf(socket, sessions, session.playerId);
+        ServerVehicle vehicle;
+        vehicle.id = g_nextVehicleId++;
+        vehicle.model = static_cast<std::uint16_t>(kModels[resp.listItem]);
+        vehicle.ownerId = session.playerId;
+        vehicle.position = {session.position.x + session.moveDirX * 6.0f,
+                            session.position.y + session.moveDirY * 6.0f,
+                            session.position.z};
+        vehicle.heading = std::atan2(-session.moveDirX, session.moveDirY);
+        g_vehicles.push_back(vehicle);
+        StreamTick(socket, sessions);
+        std::printf("[server] Создана машина id %u (модель %d) для %s через /mm\n",
+                    vehicle.id, kModels[resp.listItem], session.nick.c_str());
+        std::fflush(stdout);
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -769,6 +919,12 @@ bool HandlePayload(vc::net::UdpSocket& socket, std::map<std::string, Session>& s
                      vc::net::Reliability::ReliableOrdered, 0);
             }
         }
+        return false;
+    }
+
+    if (id == static_cast<std::uint8_t>(vc::protocol::ClientPacket::DialogResponse)) {
+        if (const auto resp = vc::protocol::ParseDialogResponse(payload))
+            HandleDialogResponse(socket, sessions, session, *resp);
         return false;
     }
 

@@ -75,6 +75,7 @@ align до байта, тело пакета         игровые пакеты
 | `KeepAlive` (22) | К→С | Unreliable/0, раз в 3 с без спавна | пустой |
 | `Disconnect` (34) | К→С | Unreliable/0 | пустой — сервер сразу закрывает сессию (иначе по таймауту 15 с) |
 | `PlayerDamage` (35) | К→С | ReliableOrdered/0 | `u16 victimId, f32 amount, u8 weapon` — клиент стрелка заметил падение HP педа-куклы и докладывает серверу; сервер шлёт жертве `TakeDamage` (v9) |
+| `DialogResponse` (36) | К→С | ReliableOrdered/0 | `u16 dialogId, u8 response, i16 listItem, Str16 inputText` — ответ на `ShowDialog`, семантика SA-MP OnDialogResponse: response 1 — первая кнопка/Enter, 0 — вторая/Esc, listItem -1 — не выбрано (v10) |
 
 Сеть клиента работает в отдельном потоке: пауза/Alt-Tab/загрузка игры соединение не рвут.
 Игровой поток только публикует свежую позицию (`SetPlayerPosition`).
@@ -97,6 +98,7 @@ align до байта, тело пакета         игровые пакеты
 | `VehicleOccupant` (113) | С→К | ReliableOrdered/0 | `u16 vehicleId, u16 playerId, u8 seat` (0 — водитель, 1–3 — пассажиры, 255 — покинул машину); клиенты сажают куклу игрока в машину (протокол v7) |
 | `GiveWeapon` (114) | С→К | ReliableOrdered/0 | `u8 weapon, u16 ammo` — сервер выдаёт оружие (команда `/gun <id> [патроны]`); клиент применяет через `CPed::GiveWeapon`+`SetCurrentWeapon` (v9) |
 | `TakeDamage` (115) | С→К | ReliableOrdered/0 | `u16 attackerId, f32 amount, u8 weapon` — сервер велит жертве вычесть HP (v9) |
+| `ShowDialog` (116) | С→К | ReliableOrdered/0 | `u16 dialogId, u8 style, Str16 caption, Str16 info, Str16 button1, Str16 button2` — диалог в стиле SA-MP (стили 0-5: MsgBox/Input/List/Password/TabList/TabListHeaders; строки - `\n`, колонки - `\t`, цвета `{RRGGBB}`); команда `/mm` (v10) |
 | `Teleport` (132) | С→К | ReliableOrdered/0 | `f32 x,y,z, f32 heading` — спавн/`/tp`/`/kill`/респавн после смерти; клиент применяет, когда мир готов и пед жив |
 | `Death` (31) | К→С | ReliableOrdered/0 | без тела — клиент заметил HP<=0; сервер прячет куклу и шлёт Teleport на спавн, по первому синку с HP>0 игрок снова в стриме |
 | `PlayerStreamOut` (106) | С→К | ReliableOrdered/0 | `u16 id` — убрать куклу |

@@ -171,6 +171,11 @@ void NetClient::HandlePayload(const std::vector<std::uint8_t>& payload) {
         m_pendingDamage.push_back(PendingDamage{nick, dmg->amount, dmg->weapon});
         Log("net: урон " + std::to_string(static_cast<int>(dmg->amount)) +
             " от игрока " + nick + "\n");
+    } else if (auto dlg = vc::protocol::ParseShowDialog(payload)) {
+        std::lock_guard lock(m_mutex);
+        m_pendingDialog = *dlg;
+        Log("net: диалог id " + std::to_string(dlg->dialogId) + " стиль " +
+            std::to_string(dlg->style) + " '" + dlg->caption + "'\n");
     } else if (auto vehicleIn = vc::protocol::ParseVehicleStreamIn(payload)) {
         std::lock_guard lock(m_mutex);
         m_remoteVehicles[vehicleIn->vehicleId] = RemoteVehicle{
@@ -228,6 +233,18 @@ void NetClient::ReportDamage(std::uint16_t victimId, float amount) {
     std::lock_guard lock(m_mutex);
     m_damageOutbox.push_back(
         vc::protocol::PlayerDamageData{victimId, amount, m_latestWeapon});
+}
+
+std::optional<vc::protocol::ShowDialogData> NetClient::TakePendingDialog() {
+    std::lock_guard lock(m_mutex);
+    auto result = m_pendingDialog;
+    m_pendingDialog.reset();
+    return result;
+}
+
+void NetClient::SendDialogResponse(const vc::protocol::DialogResponseData& data) {
+    std::lock_guard lock(m_mutex);
+    m_dialogOutbox.push_back(data);
 }
 
 void NetClient::NotifyDeath() { m_deathPending.store(true); }
@@ -377,6 +394,19 @@ void NetClient::ThreadMain() {
             if (m_state.load() == State::Connected)
                 for (const auto& d : outbox)
                     SendPayloadLockedPeer(vc::protocol::BuildPlayerDamage(d),
+                                          vc::net::Reliability::ReliableOrdered, 0, now);
+        }
+
+        // Ответы на диалоги из игрового потока (оверлей).
+        {
+            std::vector<vc::protocol::DialogResponseData> outbox;
+            {
+                std::lock_guard lock(m_mutex);
+                outbox.swap(m_dialogOutbox);
+            }
+            if (m_state.load() == State::Connected)
+                for (const auto& d : outbox)
+                    SendPayloadLockedPeer(vc::protocol::BuildDialogResponse(d),
                                           vc::net::Reliability::ReliableOrdered, 0, now);
         }
 

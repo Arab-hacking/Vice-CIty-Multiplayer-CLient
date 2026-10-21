@@ -274,6 +274,22 @@ void TestCodec() {
     const auto parsedTd = vc::protocol::ParseTakeDamage(td);
     CHECK(parsedTd && parsedTd->attackerId == 3 && parsedTd->amount == 12.0f &&
           parsedTd->weapon == 17);
+
+    // Диалоги SA-MP-стиля (протокол v10).
+    const auto sd = vc::protocol::BuildShowDialog(
+        {7, static_cast<std::uint8_t>(vc::protocol::DialogStyle::TabList), "Меню",
+         "Раз\nДва\tКолонка", "OK", "Отмена"});
+    const auto parsedSd = vc::protocol::ParseShowDialog(sd);
+    CHECK(parsedSd && parsedSd->dialogId == 7 && parsedSd->style == 4 &&
+          parsedSd->caption == "Меню" && parsedSd->info == "Раз\nДва\tКолонка" &&
+          parsedSd->button1 == "OK" && parsedSd->button2 == "Отмена");
+    const auto dr = vc::protocol::BuildDialogResponse({7, 1, 3, "привет"});
+    const auto parsedDr = vc::protocol::ParseDialogResponse(dr);
+    CHECK(parsedDr && parsedDr->dialogId == 7 && parsedDr->response == 1 &&
+          parsedDr->listItem == 3 && parsedDr->inputText == "привет");
+    const auto dr2 = vc::protocol::ParseDialogResponse(
+        vc::protocol::BuildDialogResponse({9, 0, -1, ""}));
+    CHECK(dr2 && dr2->response == 0 && dr2->listItem == -1 && dr2->inputText.empty());
 }
 
 } // namespace

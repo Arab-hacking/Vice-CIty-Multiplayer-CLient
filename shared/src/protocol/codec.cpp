@@ -451,4 +451,55 @@ std::optional<VehicleOccupantData> ParseVehicleOccupant(
     return data;
 }
 
+std::vector<std::uint8_t> BuildShowDialog(const ShowDialogData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ServerRpc::ShowDialog));
+    w.U16(data.dialogId);
+    w.U8(data.style);
+    w.Str16(data.caption);
+    w.Str16(data.info);
+    w.Str16(data.button1);
+    w.Str16(data.button2);
+    return w.out;
+}
+
+std::optional<ShowDialogData> ParseShowDialog(const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ServerRpc::ShowDialog)))
+        return std::nullopt;
+    ShowDialogData data;
+    data.dialogId = r.U16();
+    data.style = r.U8();
+    data.caption = r.Str16();
+    data.info = r.Str16();
+    data.button1 = r.Str16();
+    data.button2 = r.Str16();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
+std::vector<std::uint8_t> BuildDialogResponse(const DialogResponseData& data) {
+    Writer w;
+    w.U8(static_cast<std::uint8_t>(ClientPacket::DialogResponse));
+    w.U16(data.dialogId);
+    w.U8(data.response);
+    w.U16(static_cast<std::uint16_t>(data.listItem));
+    w.Str16(data.inputText);
+    return w.out;
+}
+
+std::optional<DialogResponseData> ParseDialogResponse(
+    const std::vector<std::uint8_t>& payload) {
+    Reader r{payload};
+    if (!r.ExpectId(static_cast<std::uint8_t>(ClientPacket::DialogResponse)))
+        return std::nullopt;
+    DialogResponseData data;
+    data.dialogId = r.U16();
+    data.response = r.U8();
+    data.listItem = static_cast<std::int16_t>(r.U16());
+    data.inputText = r.Str16();
+    if (!r.ok) return std::nullopt;
+    return data;
+}
+
 } // namespace vc::protocol

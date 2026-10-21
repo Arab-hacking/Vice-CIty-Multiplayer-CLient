@@ -56,6 +56,11 @@ float g_chatH = 220.0f;
 float g_chatBgAlpha = 0.55f;
 bool g_chatBorder = true;
 bool g_chatEdit = false; // режим настройки ленты (двигать/размер)
+// Открытый диалог от сервера (стиль SA-MP) и его локальное состояние.
+std::optional<vc::protocol::ShowDialogData> g_dialog;
+int g_dialogSel = 0;
+char g_dialogInput[144] = {};
+bool g_dialogFocus = false;
 HWND g_hwnd = nullptr;
 WNDPROC g_origWndProc = nullptr;
 
@@ -103,7 +108,7 @@ LRESULT CALLBACK HookWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     if (g_imguiReady) {
         // Пока открыт чат, клавиатуру игре не отдаём (DirectInput это не остановит —
         // движение дополнительно замораживает хук CGame::Process через Teleport).
-        if ((g_chatOpen || g_chatEdit) && (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
+        if ((g_chatOpen || g_chatEdit || g_dialog.has_value()) && (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
                            msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)) {
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
             return 0;
@@ -169,6 +174,257 @@ void DrawNametags() {
                                       static_cast<int>(220.0f * pct), 40, 255);
         draw->AddRectFilled(ImVec2(barX, barY), ImVec2(barX + kBarW * pct, barY + kBarH),
                             hpColor);
+    }
+}
+
+// Текст диалогов SA-MP: {RRGGBB} переключает цвет дальнейшего текста.
+bool IsHexColorAt(const std::string& s, std::size_t i) {
+    if (i + 8 > s.size() || s[i] != '{' || s[i + 7] != '}') return false;
+    for (int k = 1; k <= 6; ++k) {
+        const char c = s[i + static_cast<std::size_t>(k)];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return false;
+    }
+    return true;
+}
+
+ImVec4 ParseDialogColor(const std::string& s, std::size_t i) {
+    auto hexPair = [&](std::size_t idx) {
+        auto v = [](char c) {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            return c - 'A' + 10;
+        };
+        return v(s[i + idx]) * 16 + v(s[i + idx + 1]);
+    };
+    return ImVec4(hexPair(1) / 255.0f, hexPair(3) / 255.0f, hexPair(5) / 255.0f, 1.0f);
+}
+
+std::string StripDialogColors(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size();) {
+        if (IsHexColorAt(s, i)) i += 8;
+        else out += s[i++];
+    }
+    return out;
+}
+
+std::vector<std::string> SplitDialogLines(const std::string& s, char delim) {
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    while (start <= s.size()) {
+        const std::size_t pos = s.find(delim, start);
+        if (pos == std::string::npos) {
+            parts.push_back(s.substr(start));
+            break;
+        }
+        parts.push_back(s.substr(start, pos - start));
+        start = pos + 1;
+    }
+    return parts;
+}
+
+// Многострочный текст диалога с цветами {RRGGBB} построчно (как в SA-MP).
+void DrawColoredDialogText(const std::string& info) {
+    for (const auto& line : SplitDialogLines(info, '\n')) {
+        ImVec4 color(1.0f, 1.0f, 1.0f, 1.0f);
+        bool first = true;
+        std::size_t segStart = 0;
+        auto flush = [&](std::size_t end) {
+            if (end <= segStart) return;
+            if (!first) ImGui::SameLine(0.0f, 0.0f);
+            first = false;
+            ImGui::PushStyleColor(ImGuiCol_Text, color);
+            ImGui::TextUnformatted(line.c_str() + segStart, line.c_str() + end);
+            ImGui::PopStyleColor();
+        };
+        for (std::size_t i = 0; i < line.size();) {
+            if (IsHexColorAt(line, i)) {
+                flush(i);
+                color = ParseDialogColor(line, i);
+                i += 8;
+                segStart = i;
+            } else {
+                ++i;
+            }
+        }
+        flush(line.size());
+        if (first) ImGui::TextUnformatted(""); // пустая строка тоже занимает высоту
+    }
+}
+
+void SetDialogCursor(bool show) {
+    if (show) {
+        for (int i = 0; i < 16 && ShowCursor(TRUE) < 0; ++i) {
+        }
+        ClipCursor(nullptr);
+    } else {
+        for (int i = 0; i < 16 && ShowCursor(FALSE) >= 0; ++i) {
+        }
+    }
+}
+
+// Окно диалога от сервера: стили SA-MP 0-5 (MsgBox/Input/List/Password/
+// TabList/TabListHeaders). Enter - первая кнопка, Esc - вторая/закрыть,
+// стрелки и двойной клик - выбор в списке.
+void DrawDialogWindow() {
+    auto& net = vc::network::NetClient::Instance();
+    if (auto pending = net.TakePendingDialog()) {
+        g_dialog = *pending;
+        g_dialogSel = 0;
+        g_dialogInput[0] = '\0';
+        g_dialogFocus = true;
+        SetDialogCursor(true);
+        Log(("overlay: диалог '" + g_dialog->caption + "' открыт\n").c_str());
+    }
+    if (!g_dialog) return;
+    const auto dlg = *g_dialog; // копия: ответ сбросит g_dialog в конце кадра
+    const auto style = static_cast<vc::protocol::DialogStyle>(dlg.style);
+    const bool isList = style == vc::protocol::DialogStyle::List ||
+                        style == vc::protocol::DialogStyle::TabList ||
+                        style == vc::protocol::DialogStyle::TabListHeaders;
+    const bool isInput = style == vc::protocol::DialogStyle::Input ||
+                         style == vc::protocol::DialogStyle::Password;
+
+    std::vector<std::string> items;
+    std::vector<std::vector<std::string>> rows;
+    std::vector<std::string> headers;
+    int itemCount = 0;
+    if (style == vc::protocol::DialogStyle::List) {
+        for (const auto& s : SplitDialogLines(dlg.info, '\n'))
+            items.push_back(StripDialogColors(s));
+        itemCount = static_cast<int>(items.size());
+    } else if (isList) {
+        const auto rawRows = SplitDialogLines(dlg.info, '\n');
+        std::size_t start = 0;
+        if (style == vc::protocol::DialogStyle::TabListHeaders && !rawRows.empty()) {
+            for (const auto& c : SplitDialogLines(rawRows[0], '\t'))
+                headers.push_back(StripDialogColors(c));
+            start = 1;
+        }
+        for (std::size_t r = start; r < rawRows.size(); ++r) {
+            std::vector<std::string> row;
+            for (const auto& c : SplitDialogLines(rawRows[r], '\t'))
+                row.push_back(StripDialogColors(c));
+            rows.push_back(std::move(row));
+        }
+        itemCount = static_cast<int>(rows.size());
+    }
+    if (itemCount == 0) g_dialogSel = 0;
+    else if (g_dialogSel > itemCount - 1) g_dialogSel = itemCount - 1;
+    if (g_dialogSel < 0) g_dialogSel = 0;
+
+    int wantResponse = -1; // -1 нет, 0/1 - отправить после End()
+    const ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowBgAlpha(0.97f);
+    const std::string title = dlg.caption + "##vcmp_dialog";
+    if (ImGui::Begin(title.c_str(), nullptr,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (style == vc::protocol::DialogStyle::MsgBox || isInput)
+            DrawColoredDialogText(dlg.info);
+
+        if (isInput) {
+            ImGui::Spacing();
+            ImGui::SetNextItemWidth(-1.0f);
+            if (g_dialogFocus) {
+                ImGui::SetKeyboardFocusHere();
+                g_dialogFocus = false;
+            }
+            const ImGuiInputTextFlags inputFlags =
+                ImGuiInputTextFlags_EnterReturnsTrue |
+                (style == vc::protocol::DialogStyle::Password
+                     ? ImGuiInputTextFlags_Password
+                     : 0);
+            if (ImGui::InputText("##dlg_input", g_dialogInput, sizeof(g_dialogInput),
+                                 inputFlags))
+                wantResponse = 1;
+        }
+
+        if (style == vc::protocol::DialogStyle::List) {
+            ImGui::BeginChild("##dlg_list", ImVec2(0, 190), true);
+            for (int i = 0; i < itemCount; ++i) {
+                if (ImGui::Selectable((items[i] + "##" + std::to_string(i)).c_str(),
+                                      g_dialogSel == i,
+                                      ImGuiSelectableFlags_AllowDoubleClick)) {
+                    g_dialogSel = i;
+                    if (ImGui::IsMouseDoubleClicked(0)) wantResponse = 1;
+                }
+            }
+            ImGui::EndChild();
+        } else if (isList) {
+            int cols = 1;
+            for (const auto& row : rows)
+                if (static_cast<int>(row.size()) > cols)
+                    cols = static_cast<int>(row.size());
+            if (static_cast<int>(headers.size()) > cols)
+                cols = static_cast<int>(headers.size());
+            ImGui::BeginChild("##dlg_tab", ImVec2(0, 190), false);
+            if (ImGui::BeginTable("##dlg_table", cols,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                for (int c = 0; c < cols; ++c)
+                    ImGui::TableSetupColumn(
+                        c < static_cast<int>(headers.size()) ? headers[c].c_str() : "");
+                if (!headers.empty()) ImGui::TableHeadersRow();
+                for (int i = 0; i < itemCount; ++i) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    const std::string first = rows[i].empty() ? "" : rows[i][0];
+                    if (ImGui::Selectable(
+                            (first + "##r" + std::to_string(i)).c_str(), g_dialogSel == i,
+                            ImGuiSelectableFlags_SpanAllColumns |
+                                ImGuiSelectableFlags_AllowDoubleClick)) {
+                        g_dialogSel = i;
+                        if (ImGui::IsMouseDoubleClicked(0)) wantResponse = 1;
+                    }
+                    for (int c = 1; c < cols && c < static_cast<int>(rows[i].size()); ++c) {
+                        ImGui::TableSetColumnIndex(c);
+                        ImGui::TextUnformatted(rows[i][c].c_str());
+                    }
+                }
+                ImGui::EndTable();
+            }
+            ImGui::EndChild();
+        }
+
+        if (isList && itemCount > 0) {
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) &&
+                g_dialogSel < itemCount - 1)
+                ++g_dialogSel;
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) && g_dialogSel > 0)
+                --g_dialogSel;
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button(dlg.button1.empty() ? "OK" : dlg.button1.c_str(),
+                          ImVec2(130, 0)))
+            wantResponse = 1;
+        if (!dlg.button2.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button(dlg.button2.c_str(), ImVec2(130, 0))) wantResponse = 0;
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) wantResponse = 0;
+        if (!isInput && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
+            wantResponse = 1;
+    }
+    ImGui::End();
+
+    if (wantResponse >= 0) {
+        vc::protocol::DialogResponseData resp;
+        resp.dialogId = dlg.dialogId;
+        resp.response = static_cast<std::uint8_t>(wantResponse);
+        resp.listItem = (isList && wantResponse == 1 && itemCount > 0)
+                            ? static_cast<std::int16_t>(g_dialogSel)
+                            : static_cast<std::int16_t>(-1);
+        resp.inputText = isInput ? g_dialogInput : "";
+        net.SendDialogResponse(resp);
+        g_dialog.reset();
+        SetDialogCursor(false);
     }
 }
 
@@ -393,6 +649,7 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9* device) {
 
         DrawChatFeed();
         DrawChatWindow();
+        DrawDialogWindow();
         DrawNametags();
 
         ImGui::EndFrame();

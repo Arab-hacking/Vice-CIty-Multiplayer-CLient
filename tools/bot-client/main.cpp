@@ -36,6 +36,7 @@ int main(int argc, char** argv) {
     int driveSeat = 0;
     int hitId = -1; // --hit <playerId> <amount>: доложить серверу об уроне
     int hitAmount = 0;
+    int dialogPick = -100; // --dialog <n>: авто-ответ на диалоги (пункт списка)
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--drive") drive = true;
         if (std::string(argv[i]) == "--damage") damage = true;
@@ -45,6 +46,8 @@ int main(int argc, char** argv) {
             hitId = std::atoi(argv[i + 1]);
             hitAmount = std::atoi(argv[i + 2]);
         }
+        if (std::string(argv[i]) == "--dialog" && i + 1 < argc)
+            dialogPick = std::atoi(argv[i + 1]);
     }
     for (int i = 1; i + 1 < argc; ++i) {
         const std::string arg = argv[i];
@@ -153,6 +156,25 @@ int main(int argc, char** argv) {
                                 static_cast<double>(dmg->amount), dmg->attackerId,
                                 dmg->weapon);
                     std::fflush(stdout);
+                } else if (auto dlg = vc::protocol::ParseShowDialog(payload)) {
+                    std::printf("[bot] диалог id %u стиль %u '%s'\n", dlg->dialogId,
+                                dlg->style, dlg->caption.c_str());
+                    std::fflush(stdout);
+                    static int dialogsAnswered = 0;
+                    if (dialogPick != -100 && dialogsAnswered < 3) {
+                        ++dialogsAnswered;
+                        vc::protocol::DialogResponseData resp;
+                        resp.dialogId = dlg->dialogId;
+                        resp.response = 1;
+                        if (dlg->style == 2 || dlg->style == 4 || dlg->style == 5)
+                            resp.listItem = static_cast<std::int16_t>(dialogPick);
+                        if (dlg->style == 1 || dlg->style == 3) resp.inputText = "test";
+                        send(vc::protocol::BuildDialogResponse(resp),
+                             vc::net::Reliability::ReliableOrdered, 0);
+                        std::printf("[bot] ответил на диалог %u (listitem %d)\n",
+                                    resp.dialogId, resp.listItem);
+                        std::fflush(stdout);
+                    }
                 } else if (auto rej = vc::protocol::ParseConnectionRejected(payload)) {
                     std::printf("vc-bot: ОТКАЗ: %s\n", rej->c_str());
                     return 1;

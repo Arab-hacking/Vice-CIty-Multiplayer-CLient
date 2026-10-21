@@ -183,4 +183,41 @@ inline constexpr std::uint8_t kSeatVacated = 255;
 [[nodiscard]] std::optional<VehicleOccupantData> ParseVehicleOccupant(
     const std::vector<std::uint8_t>& payload);
 
+// Диалоги в стиле SA-MP (протокол v10). ShowDialog: [116][u16 dialogId]
+// [u8 style][Str16 caption][Str16 info][Str16 button1][Str16 button2].
+// Стили как в SA-MP: строки списка - '\n', колонки таблоида - '\t',
+// цвета в тексте - {RRGGBB}.
+enum class DialogStyle : std::uint8_t {
+    MsgBox = 0,
+    Input = 1,
+    List = 2,
+    Password = 3,
+    TabList = 4,
+    TabListHeaders = 5,
+};
+struct ShowDialogData {
+    std::uint16_t dialogId = 0;
+    std::uint8_t style = 0;
+    std::string caption;
+    std::string info;
+    std::string button1;
+    std::string button2;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildShowDialog(const ShowDialogData& data);
+[[nodiscard]] std::optional<ShowDialogData> ParseShowDialog(
+    const std::vector<std::uint8_t>& payload);
+
+// DialogResponse: [36][u16 dialogId][u8 response][i16 listItem]
+// [Str16 inputText] - семантика как OnDialogResponse в SA-MP: response 1 -
+// первая кнопка/Enter, 0 - вторая/Esc; listItem -1, если не выбрано.
+struct DialogResponseData {
+    std::uint16_t dialogId = 0;
+    std::uint8_t response = 0;
+    std::int16_t listItem = -1;
+    std::string inputText;
+};
+[[nodiscard]] std::vector<std::uint8_t> BuildDialogResponse(const DialogResponseData& data);
+[[nodiscard]] std::optional<DialogResponseData> ParseDialogResponse(
+    const std::vector<std::uint8_t>& payload);
+
 } // namespace vc::protocol

@@ -21,6 +21,7 @@ enum class ClientPacket : std::uint8_t {
     ExitVehicle       = 33,
     Disconnect        = 34,
     PlayerDamage      = 35,
+    DialogResponse    = 36,
 };
 
 // Сервер -> Клиент (RPC)
@@ -39,6 +40,7 @@ enum class ServerRpc : std::uint8_t {
     VehicleOccupant    = 113,
     GiveWeapon         = 114,
     TakeDamage         = 115,
+    ShowDialog         = 116,
     CreateObject       = 120,
     DestroyObject      = 121,
     ServerMessage      = 130,
