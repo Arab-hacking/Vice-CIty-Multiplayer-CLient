@@ -69,6 +69,12 @@ CURATED = [
     ("kCPedSetMoveAnim", "?SetMoveAnim@CPed@@UEAAXXZ", "void CPed::SetMoveAnim() — применяет анимацию по m_nMoveState (сам проверяет смену)"),
     ("kCObjectCtor", "??0CObject@@QEAA@H_N@Z", "CObject::CObject(int32 model, bool createRW) — конструктор серверного объекта/пикапа"),
     ("kCPoolObjectNew", "?New@?$CPool@VCObject@@VCCutsceneObject@@@@QEAAPEAVCObject@@XZ", "CPool<CObject>::New() — слот пула объектов"),
+    ("kCPoolsPtrNodePool", "?ms_pPtrNodePool@CPools@@0PEAV?$CPool@VCPtrNode@@V1@@@EA", "CPool<CPtrNode>* CPools::ms_pPtrNodePool"),
+    ("kCPoolsEntryInfoNodePool", "?ms_pEntryInfoNodePool@CPools@@0PEAV?$CPool@VCEntryInfoNode@@V1@@@EA", "CPool<CEntryInfoNode>* CPools::ms_pEntryInfoNodePool"),
+    ("kCPoolsBuildingPool", "?ms_pBuildingPool@CPools@@0PEAV?$CPool@VCBuilding@@V1@@@EA", "CPool<CBuilding>* CPools::ms_pBuildingPool"),
+    ("kCPoolsDummyPool", "?ms_pDummyPool@CPools@@0PEAV?$CPool@VCDummy@@VCDummyPed@@@@EA", "CPool<CDummy>* CPools::ms_pDummyPool"),
+    ("kCModelInfoGetByName", "?GetModelInfo@CModelInfo@@SAPEAVCBaseModelInfo@@PEBDPEAH@Z", "CModelInfo::GetModelInfo(name, &id) — IDE id модели по имени"),
+    ("kCStreamingMemoryAvailable", "?ms_memoryAvailable@CStreaming@@2_KA", "uint64 CStreaming::ms_memoryAvailable — лимит памяти стриминга (байт)"),
 ]
 
 

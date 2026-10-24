@@ -151,4 +151,22 @@ inline constexpr std::uintptr_t kCObjectCtor = 0x001D2730u;
 // CPool<CObject>::New() — слот пула объектов
 inline constexpr std::uintptr_t kCPoolObjectNew = 0x001D3510u;
 
+// CPool<CPtrNode>* CPools::ms_pPtrNodePool
+inline constexpr std::uintptr_t kCPoolsPtrNodePool = 0x00633DF0u;
+
+// CPool<CEntryInfoNode>* CPools::ms_pEntryInfoNodePool
+inline constexpr std::uintptr_t kCPoolsEntryInfoNodePool = 0x00633DF8u;
+
+// CPool<CBuilding>* CPools::ms_pBuildingPool
+inline constexpr std::uintptr_t kCPoolsBuildingPool = 0x00633E10u;
+
+// CPool<CDummy>* CPools::ms_pDummyPool
+inline constexpr std::uintptr_t kCPoolsDummyPool = 0x00633E28u;
+
+// CModelInfo::GetModelInfo(name, &id) — IDE id модели по имени
+inline constexpr std::uintptr_t kCModelInfoGetByName = 0x001CCB40u;
+
+// uint64 CStreaming::ms_memoryAvailable — лимит памяти стриминга (байт)
+inline constexpr std::uintptr_t kCStreamingMemoryAvailable = 0x0083BCC8u;
+
 } // namespace vc::game::revc

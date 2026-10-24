@@ -25,6 +25,7 @@
 #include "../../pools/vehicle_pool.h"
 #include "../../render/overlay.h"
 #include "../revc.h"
+#include "../world_unlock.h"
 #include "hook_cgame_process.h"
 
 namespace vc::game::hooks {
@@ -287,6 +288,7 @@ void OnFrameAfterOriginal() {
     vc::pools::PlayerPool::Instance().Tick(); // куклы удалённых игроков
     vc::pools::VehiclePool::Instance().Tick(); // серверные машины
     vc::pools::ObjectPool::Instance().Tick();  // серверные объекты и пикапы
+    vc::game::WorldUnlockTick(); // баррикады мостов, рост пулов, память стриминга
 
     // G — сесть пассажиром в ближайшую серверную машину / выйти из неё (как
     // в SA-MP; в самой VC посадки пассажиром нет). Фактическое место следом

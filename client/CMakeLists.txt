@@ -32,6 +32,7 @@ target_compile_features(vc-imgui PUBLIC cxx_std_20)
 add_library(vc-client SHARED
     src/dllmain.cpp
     src/game/hooks/hook_cgame_process.cpp
+    src/game/world_unlock.cpp
     src/network/net_client.cpp
     src/pools/player_pool.cpp
     src/pools/vehicle_pool.cpp

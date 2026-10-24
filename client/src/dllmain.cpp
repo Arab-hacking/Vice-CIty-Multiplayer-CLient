@@ -21,6 +21,7 @@
 #include "game/revc.h"
 #include "network/net_client.h"
 #include "pools/player_pool.h"
+#include "game/world_unlock.h"
 #include "pools/object_pool.h"
 #include "pools/vehicle_pool.h"
 #include "render/overlay.h"
@@ -123,6 +124,7 @@ DWORD WINAPI InitThread(LPVOID) {
         vc::pools::PlayerPool::Instance().Init(log);
         vc::pools::VehiclePool::Instance().Init(log);
         vc::pools::ObjectPool::Instance().Init(log);
+        vc::game::InitWorldUnlock(log); // баррикады мостов + рост пулов
         vc::network::NetClient::Instance().Init(log, DllDirectory() + "vc-client.ini");
         // Лог НЕ закрываем: хуки пишут в него из игрового потока всю сессию.
     } else {
