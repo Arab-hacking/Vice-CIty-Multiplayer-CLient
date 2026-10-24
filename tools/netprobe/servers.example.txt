@@ -1,0 +1,8 @@
+# Формат: ip port название (для vc-netprobe --file)
+# Замечание: netprobe умеет только RakNet offline-ping и SA-MP query —
+# то, что делает сервер-браузер. Серверы с кастомным (не SA-MP) query
+# могут на них не отвечать, даже будучи онлайн.
+127.0.0.1 7777 Local VC:MP test server
+80.66.82.46 5125 BLACK RUSSIA | RED
+80.66.82.47 5125 BLACK RUSSIA | GREEN
+80.66.82.197 5125 BLACK RUSSIA | BLUE
