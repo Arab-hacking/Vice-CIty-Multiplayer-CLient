@@ -1,0 +1,19 @@
+Vice City Multiplayer Client — third-party attributions
+
+1) PyRakBR-fork (https://github.com/Sahiro01/PyRakBR-fork), MIT License,
+   Copyright (c) 2026 Sahiro01.
+   The RakNet wire format implemented in shared/include/shared/net/ and
+   shared/src/net/ (BitStream semantics, internal-packet header layout,
+   ACK range encoding) was ported to C++ using that project's
+   core/bitstream.py and core/protocol.py as the reference implementation.
+   No Black Russia/SA-MP login, authentication or bot logic from that
+   project is used in this codebase.
+
+2) RakNet offline-message constants (OFFLINE_MESSAGE_DATA_ID, unconnected
+   ping/pong ids) and the SA-MP server query format are long-public
+   protocol conventions used by server browsers; implemented from those
+   public formats.
+
+This project contains no Grand Theft Auto / reVC game binaries or assets.
+A legally obtained copy of the game (or a self-built reVC) is required.
+Unofficial fan project, not affiliated with Rockstar Games / Take-Two.

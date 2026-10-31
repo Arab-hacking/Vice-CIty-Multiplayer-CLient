@@ -1,0 +1,18 @@
+[Unit]
+Description=Vice City Multiplayer Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vcmp
+WorkingDirectory=/opt/vcmp
+ExecStart=/opt/vcmp/vc-server --config /opt/vcmp/server.cfg
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/vcmp
+
+[Install]
+WantedBy=multi-user.target

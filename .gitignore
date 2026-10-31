@@ -1,0 +1,36 @@
+# --- Сборка ---
+build/
+out/
+dist/
+*.user
+.vs/
+CMakeUserPresets.json
+
+# --- Зависимости ---
+vcpkg_installed/
+
+# --- Игра и её файлы (НЕ коммитим!) ---
+# ВАЖНО: с ведущим слэшем, иначе под шаблон попадал client/src/game/
+/game/
+/reVC/
+GTA Vice City/
+gta-vc.exe
+reVC.exe
+reVC.pdb
+*.img
+*.dff
+*.txd
+
+# --- Реверс-инжиниринг ---
+*.i64
+*.idb
+*.gpr
+*.rep/
+*.dmp
+
+# --- Рантайм ---
+*.log
+settings.json
+server.cfg
+!server/config/server.cfg.example
+__pycache__/
